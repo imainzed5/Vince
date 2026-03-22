@@ -1,0 +1,179 @@
+PROJECT OVERVIEW
+Team Workspace App
+A focused collaboration tool for small freelance and student teams
+
+Prepared by: DevGroup PH
+Type: Side Project / Portfolio
+Target Users: Small freelance teams, college project groups
+Developer: Solo (Juan D.)
+
+1. Executive Summary
+Most team collaboration tools are either too bloated (Notion, Jira) or too generic (Google Docs, group chats). Small teams — especially freelance groups and college project teams — need something in between: a focused, fast workspace with just the features they actually use.
+
+The Team Workspace App is a lightweight, real-time collaboration platform built specifically for small teams of 2–6 people. It combines a task board, shared notes, group chat, and an activity feed into one clean interface — no unnecessary complexity, no subscription fees, and no learning curve.
+
+The project serves two purposes: it solves a real problem the team faces right now while building a portfolio-worthy full-stack application that demonstrates proficiency in modern web development, real-time systems, and product thinking.
+
+Core Value Proposition: One place for your team’s tasks, notes, and conversations — without the bloat. Built for small teams who just want to get things done.
+
+2. Problem Statement
+Small freelance teams and college project groups face a recurring set of coordination problems:
+•	Scattered communication: Tasks get discussed in group chats and forgotten
+•	Fragmented tools: Project notes live in separate Google Docs with no connection to tasks
+•	No visibility: No single source of truth — who’s doing what, and by when?
+•	Overengineered solutions: Tools like Notion or Jira are overkill and slow to set up
+•	Context collapse: Group chats mix work updates with casual conversation
+
+For a freelance group actively taking on client projects, these problems directly affect delivery quality, client trust, and team morale.
+
+3. Information Architecture
+The app is structured in three levels: Workspace → Project → Task.
+
+Workspace Level
+•	Dashboard — All projects overview, member activity, quick stats
+•	Projects — List of all projects with status and phase
+•	Chat — Workspace-wide general chat
+•	Activity Feed — Everything happening across all projects
+•	Members — Team roster and roles
+•	Settings — Workspace name, invite link, manage members
+
+Project Level (tabs when inside a project)
+•	Board — Kanban view (default), 5-column workflow
+•	Overview — Project phase, progress %, milestones, standup posts, client link
+•	Notes — Project-specific wiki with pinned notes
+•	Chat — Project-level conversation with @mentions
+•	Activity — Full project history log
+
+Task Level (side panel or modal)
+•	Details — Title, description, status, assignee, due date, milestone tag
+•	Blocker flag — Mark as blocked with a reason
+•	Comments — Thread of comments per task
+•	Attachments — File uploads via Supabase Storage
+
+4. Feature Breakdown
+
+Phase 1 — Core
+Feature	Description	Phase
+Auth & workspaces	Email/password auth, create or join a workspace via invite code	Phase 1
+Task board	5-column kanban: Backlog / Todo / In Progress / In Review / Done	Phase 1
+Task identifiers	Auto-generated IDs per project (e.g. CWR-01, DGP-04)	Phase 1
+Task assignments	Assign tasks to team members, filter by assignee	Phase 1
+Priority flags	Urgent / High / Medium / No priority on every task	Phase 1
+Blocker flag	Mark a task as blocked with a short reason, highlighted in red	Phase 1
+Project status	Phase indicator: Planning → In Progress → In Review → Done	Phase 1
+Shared notes	Rich text notes per project, visible to all members	Phase 1
+Group chat	Real-time chat at both workspace and project level	Phase 1
+Activity feed	Auto-log of all workspace events across all projects	Phase 1
+Keyboard shortcut	Press C anywhere to open quick task creation modal	Phase 1
+
+Phase 2 — Depth
+Feature	Description	Phase
+Task detail view	Side panel with full details, comments, history, attachments	Phase 2
+Due dates & overdue	Set deadlines on tasks, auto-flag overdue ones in red	Phase 2
+Milestone markers	Group tasks under milestones on the board	Phase 2
+Standup thread	Structured per-project update posts: done / next / blockers	Phase 2
+Who’s working on what	Active tasks overview showing each member’s in-progress work	Phase 2
+My tasks view	Personal view of all tasks assigned to you, across all projects	Phase 2
+List view	Compact list view of tasks alongside the kanban board	Phase 2
+@mentions	Tag teammates in chat, triggers notification badge	Phase 2
+Notifications	Bell icon with unread count for mentions and assignments	Phase 2
+File attachments	Upload files to tasks (images, docs) via Supabase Storage	Phase 2
+Global search	Search across tasks, notes, and chat in one bar	Phase 2
+Emoji reactions	React to chat messages and standup updates	Phase 2
+
+Phase 3 — Growth + PWA
+Feature	Description	Phase
+Client guest access	Read-only project view link for external clients	Phase 3
+Progress snapshot	One-click generate a copy-paste client update summary (manual, no AI)	Phase 3
+Weekly digest email	Auto-generated Monday summary email per member (no AI, template-based)	Phase 3
+PWA support	Installable on homescreen, partial offline support via service worker	Phase 3
+Mobile responsive	Sidebar collapses to bottom nav on small screens	Phase 3
+Task completion animation	Satisfying micro-animation when a task is marked done	Phase 3
+AI task suggester	FUTURE: Claude API integration — deferred until budget available	Future
+AI progress snapshot	FUTURE: AI-generated client update summaries via Claude API	Future
+AI weekly digest	FUTURE: AI-written Monday digest email per member	Future
+
+5. Tech Stack
+
+Frontend
+Tool / Library	Purpose
+Next.js 14	App Router, SSR, API routes, routing
+Tailwind CSS	Utility-first styling
+shadcn/ui	Component library built on Radix UI
+Zustand	Lightweight client-side state management
+@dnd-kit	Drag and drop for the kanban board
+Framer Motion	Animations — task completion, transitions, micro-interactions
+
+Backend & Database
+Tool / Library	Purpose
+Supabase	PostgreSQL database, auth, real-time, file storage
+Supabase Auth	Email/password and magic link authentication
+Supabase Realtime	Live updates for chat, activity feed, board changes
+Supabase Storage	File attachments on tasks
+Row Level Security	Data isolation — each workspace’s data is protected
+
+AI (Planned — Future Implementation)
+Tool / Library	Purpose
+Anthropic Claude API	Planned: task suggester, progress snapshot generator, weekly digest — deferred until budget is available
+
+Dev & Deployment
+Tool / Library	Purpose
+Vercel	Hosting with automatic preview deployments per branch
+GitHub	Version control with branch protection rules
+TypeScript	Type safety across the entire project
+ESLint + Prettier	Code quality and consistent formatting
+
+6. Data Model
+High-level schema. Full RLS policies to be written before any frontend work begins.
+
+•	workspaces — id, name, invite_code, created_by
+•	workspace_members — workspace_id, user_id, role
+•	projects — id, workspace_id, name, status, phase, progress_pct
+•	tasks — id, project_id, identifier, title, status, priority, assignee_id, due_date, is_blocked, blocked_reason, milestone_id
+•	milestones — id, project_id, name, due_date
+•	notes — id, project_id, title, content, updated_by, is_pinned
+•	messages — id, workspace_id, project_id (nullable), user_id, content, created_at
+•	standups — id, project_id, user_id, done, next, blockers, created_at
+•	activity_log — id, workspace_id, project_id, actor_id, action, metadata, created_at
+•	attachments — id, task_id, user_id, file_url, file_name, created_at
+
+7. Real-Time Strategy
+Supabase Realtime handles live updates for chat messages, task status changes, and activity feed entries. Clients subscribe to relevant channels on mount and update local state on incoming events — no polling required.
+
+•	workspace:{id} channel — workspace-wide chat, member join events
+•	project:{id} channel — task changes, project-level chat, standup posts
+•	activity:{workspace_id} channel — activity feed updates
+
+8. Build Plan
+Phase	Focus	Duration	Deliverables
+Phase 1	Core workspace — auth, board, notes, chat, activity feed	2–3 weeks	Fully usable by the team, deployed on Vercel
+Phase 2	Depth features — task detail, due dates, notifications, search, standups	2–3 weeks	Production-ready, shareable with other teams
+Phase 3	AI layer + growth — task suggester, digest, client view, mobile	2–4 weeks	Portfolio-ready, open for public signups
+
+Development approach: Build Phase 1 for the team’s own immediate use. Real usage will surface what actually matters before investing time in Phase 2 and 3 features. Ship early, use it daily, iterate from there.
+
+9. Risks & Considerations
+•	Chat scope creep: Keep Phase 1 chat simple — no read receipts, no presence indicators, no pagination until Phase 2
+•	RLS misconfiguration: Row-level security policies must be written and tested before any frontend work. A misconfigured rule can expose one workspace’s data to another.
+•	Supabase free tier limits: 500MB DB, 1GB storage, 50MB file uploads. Design with this in mind; migrate to paid when needed.
+•	Solo dev pace: Scope is ambitious for one developer. Phase 1 must be kept tight — resist adding Phase 2 features early.
+•	Mobile experience: Without mobile responsiveness, teammates on phones will have a poor experience. Prioritize PWA support in Phase 3 at the latest.
+•	AI integration (future): Claude API integration is planned but deferred. Features like task suggester and AI digest are designed so they can be layered in later without restructuring the codebase.
+
+10. Success Metrics
+•	The team uses it daily for their own freelance work by end of Phase 1
+•	At least one other team outside the original group signs up and uses it
+•	The project is live, deployed, and linked on all team members’ portfolios
+•	A client or potential employer asks about it after seeing the portfolio
+
+11. Immediate Next Steps
+•	Agree on a project name and set up the GitHub repo with branch protection rules
+•	Initialize the Next.js project with TypeScript, Tailwind, and shadcn/ui
+•	Create a new Supabase project and connect it to the repo
+•	Design the full database schema and write RLS policies before any frontend work
+•	Build auth (sign up, sign in, workspace creation) as the first working feature
+•	Stand up the task board with static data to validate the UI before wiring the backend
+•	Deploy to Vercel from day one — even if it’s just a login screen
+
+First milestone target: Within the first week — auth working, one workspace created, and at least one task on the board — deployed and accessible via a real URL. Everything else builds on top of that.
+

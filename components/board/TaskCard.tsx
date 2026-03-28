@@ -1,0 +1,115 @@
+"use client";
+
+import { useMemo } from "react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CalendarDays } from "lucide-react";
+
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { formatCalendarDate } from "@/lib/utils/time";
+import { cn } from "@/lib/utils";
+import { PRIORITY_CONFIG } from "@/components/board/config";
+import type { Task } from "@/types";
+
+type TaskCardProps = {
+  task: Task;
+  onOpenTask: (taskId: string) => void;
+  isDragDisabled?: boolean;
+  isOverlay?: boolean;
+  isDraggingSource?: boolean;
+  isHighlighted?: boolean;
+  isEntering?: boolean;
+};
+
+function toInitials(value: string | null): string {
+  if (!value) {
+    return "?";
+  }
+
+  return value.replace(/-/g, "").slice(0, 2).toUpperCase();
+}
+
+function toDateLabel(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  return formatCalendarDate(value, { fallback: "" }) || null;
+}
+
+export function TaskCard({
+  task,
+  onOpenTask,
+  isDragDisabled = false,
+  isOverlay = false,
+  isDraggingSource = false,
+  isHighlighted = false,
+  isEntering = false,
+}: TaskCardProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: task.id,
+    disabled: isDragDisabled || isOverlay,
+    transition: {
+      duration: 260,
+      easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+    },
+  });
+
+  const dueLabel = useMemo(() => toDateLabel(task.due_date), [task.due_date]);
+  const isOverdue =
+    Boolean(task.due_date) &&
+    task.status !== "done" &&
+    new Date(task.due_date as string) < new Date(new Date().toDateString());
+
+  const style = {
+    transform: transform
+      ? `translate3d(${transform.x}px, ${transform.y}px, 0) scaleX(${transform.scaleX}) scaleY(${transform.scaleY})`
+      : undefined,
+    transition,
+  };
+
+  const priority = PRIORITY_CONFIG[task.priority];
+  const dragHandleProps = isDragDisabled ? {} : { ...attributes, ...listeners };
+  const isInteractive = !isDragDisabled && !isOverlay;
+
+  return (
+    <article
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "relative rounded-lg border bg-white p-3 shadow-sm transition-[transform,box-shadow,opacity,border-color,background-color] duration-200 ease-out will-change-transform",
+        isInteractive && "cursor-grab hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md active:scale-[0.99] active:cursor-grabbing active:shadow-sm",
+        !isInteractive && !isOverlay && "cursor-pointer",
+        isOverlay && "pointer-events-none scale-[1.02] shadow-2xl ring-1 ring-blue-200 animate-board-overlay-float",
+        task.is_blocked ? "border-l-2 border-l-red-500" : "border-slate-200",
+        task.status === "done" && "opacity-60",
+        isHighlighted && !isOverlay && "animate-board-task-highlight",
+        isEntering && !isOverlay && "animate-board-task-enter",
+        (isDragging || isDraggingSource) && "opacity-35 shadow-none scale-[0.985]",
+      )}
+      {...dragHandleProps}
+      onClick={isOverlay ? undefined : () => onOpenTask(task.id)}
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-slate-500">{task.identifier}</span>
+        <span className={cn("size-2 rounded-full", priority.color)} title={priority.label} />
+      </div>
+      <p className={cn("text-sm font-medium text-slate-900", task.status === "done" && "line-through")}>{task.title}</p>
+      {task.is_blocked && task.blocked_reason ? (
+        <p className="mt-1 text-xs text-red-600">Blocked: {task.blocked_reason}</p>
+      ) : null}
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <Avatar size="sm">
+          <AvatarFallback>{toInitials(task.assignee_id)}</AvatarFallback>
+        </Avatar>
+        {dueLabel ? (
+          <span className={cn("inline-flex items-center gap-1 text-xs", isOverdue ? "text-red-600" : "text-slate-500")}>
+            <CalendarDays className="size-3" />
+            {dueLabel}
+          </span>
+        ) : (
+          <span className="text-xs text-slate-400">No due date</span>
+        )}
+      </div>
+    </article>
+  );
+}

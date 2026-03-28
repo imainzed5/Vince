@@ -20,7 +20,7 @@ Vince is a focused collaboration tool that combines a task board, shared notes, 
 - The project is named **Vince** (the docx may still say "Team Workspace App" in places)
 - I am the **solo developer** on this
 - The Claude API / AI features are **fully deferred** — do not scaffold, reference, or plan anything AI-related
-- Task identifiers use the prefix **VNC-** (e.g. VNC-01, VNC-02)
+- Task identifiers use **project-specific prefixes** (for example `CWR-01`, `DGP-04`) rather than one global prefix
 - We are targeting **Supabase free tier** — 500MB DB, 1GB storage, 50MB file uploads
 - Platform is **web app**, evolving to **PWA in Phase 3** — no Electron, no native
 
@@ -193,7 +193,7 @@ activity:{workspaceId} — activity feed updates
 - Done tasks are faded (reduced opacity) with strikethrough title
 
 ### Task Cards
-- Show: identifier (VNC-01), title, priority dot, assignee avatar, due date
+- Show: identifier (for example `CWR-01`), title, priority dot, assignee avatar, due date
 - Blocked tasks have a red left border and inline blocker reason
 - Overdue due dates render in red
 - Press **`C`** anywhere to open the quick task creation modal
@@ -214,7 +214,7 @@ activity:{workspaceId} — activity feed updates
 ## Feature Phases
 
 ### Phase 1 — Core (build this first)
-Auth, workspace creation, task board, task identifiers (VNC-XX), priority flags, blocker flags, project phase indicator, shared notes, real-time group chat (workspace + project level), activity feed, keyboard shortcut (C to create task)
+Auth, workspace creation, task board, project-specific task identifiers, priority flags, blocker flags, project phase indicator, shared notes, real-time group chat (workspace + project level), activity feed, keyboard shortcut (C to create task)
 
 ### Phase 2 — Depth
 Task detail panel, due dates + overdue flagging, milestones, standup thread, who's working on what, My tasks view, list view, @mentions, notifications, file attachments, global search, emoji reactions

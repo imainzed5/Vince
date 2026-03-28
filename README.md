@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Vince
 
-## Getting Started
+Vince is a lightweight real-time team workspace for small freelance and student teams. It combines task tracking, shared notes, workspace chat, project chat, activity feeds, and member management in one focused web app.
 
-First, run the development server:
+## Stack
+
+- Next.js App Router with TypeScript
+- Tailwind CSS
+- Supabase Auth, Postgres, Realtime, and Storage
+- Zustand for client state
+- dnd-kit for board interactions
+
+## Current Product Direction
+
+Vince is designed around small teams that need a clean shared workspace without heavy project-management overhead. The app structure in this repository includes:
+
+- authentication flows
+- workspace creation and invite-code onboarding
+- workspace and project navigation
+- task board foundations
+- shared notes
+- workspace and project chat
+- activity feeds
+- notifications and member views
+
+## Local Development
+
+1. Install dependencies.
+2. Copy `.env.local.example` to `.env.local` and fill in your Supabase values.
+3. Start the development server.
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000` in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment Variables
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+The app expects these values in `.env.local`:
 
-## Learn More
+- `NEXT_PUBLIC_APP_URL`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
 
-To learn more about Next.js, take a look at the following resources:
+Use `.env.local.example` as the public template.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Scripts
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+- `npm run dev` starts the Next.js dev server
+- `npm run build` creates a production build
+- `npm run start` runs the production server
+- `npm run lint` runs ESLint
+- `npm run verify:rls` verifies workspace onboarding and RLS expectations against Supabase
 
-## Deploy on Vercel
+## Notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+- This repository targets Vercel deployment.
+- Supabase Row Level Security is a core part of the data access model.
+- Local environment files and build artifacts are intentionally excluded from git.

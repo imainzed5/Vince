@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { BoardView } from "@/components/board/BoardView";
+import { RealtimeRefreshBridge } from "@/components/shared/RealtimeRefreshBridge";
 import { getWorkspaceMemberNames } from "@/lib/supabase/member-names";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database.types";
@@ -76,6 +77,14 @@ export default async function BoardPage({ params }: BoardPageProps) {
 
   return (
     <main className="p-6">
+      <RealtimeRefreshBridge
+        name={`project:${projectId}:board-refresh`}
+        subscriptions={[
+          { table: "projects", filter: `id=eq.${projectId}` },
+          { table: "milestones", filter: `project_id=eq.${projectId}` },
+          { table: "workspace_members", filter: `workspace_id=eq.${workspaceId}` },
+        ]}
+      />
       <BoardView
         workspaceId={workspaceId}
         projectId={projectId}

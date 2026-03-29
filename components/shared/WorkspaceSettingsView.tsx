@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatCalendarDate } from "@/lib/utils/time";
 
 type WorkspaceSettingsViewProps = {
@@ -54,7 +55,13 @@ export function WorkspaceSettingsView({
   const canDeleteWorkspace = deleteConfirmation.trim() === savedName;
 
   const copyInviteCode = async () => {
-    await navigator.clipboard.writeText(inviteCode);
+    const copiedToClipboard = await copyTextToClipboard(inviteCode);
+
+    if (!copiedToClipboard) {
+      toast.error("Clipboard access was blocked. Focus the tab and try again.");
+      return;
+    }
+
     setCopied(true);
     toast.success("Invite code copied.");
     window.setTimeout(() => setCopied(false), 1500);

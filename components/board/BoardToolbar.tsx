@@ -1,4 +1,4 @@
-import { Filter, Keyboard, ListChecks, RotateCcw, Users } from "lucide-react";
+import { Filter, Keyboard, LayoutGrid, ListChecks, RotateCcw, Users } from "lucide-react";
 
 import { PRIORITY_CONFIG } from "@/components/board/config";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import type { TaskPriority } from "@/types";
 
 type BoardToolbarProps = {
   onCreateTask: () => void;
+  onViewModeChange: (value: "board" | "list") => void;
   createDisabled?: boolean;
   assigneeOptions: Array<{ id: string; name: string }>;
   assigneeFilter: string;
@@ -22,10 +23,12 @@ type BoardToolbarProps = {
   onPriorityFilterChange: (value: TaskPriority | "all") => void;
   visibleTaskCount: number;
   totalTaskCount: number;
+  viewMode: "board" | "list";
 };
 
 export function BoardToolbar({
   onCreateTask,
+  onViewModeChange,
   createDisabled = false,
   assigneeOptions,
   assigneeFilter,
@@ -34,6 +37,7 @@ export function BoardToolbar({
   onPriorityFilterChange,
   visibleTaskCount,
   totalTaskCount,
+  viewMode,
 }: BoardToolbarProps) {
   const hasActiveFilters = assigneeFilter !== "all" || priorityFilter !== "all";
 
@@ -43,10 +47,16 @@ export function BoardToolbar({
         <Button type="button" size="sm" onClick={onCreateTask} disabled={createDisabled}>
           + Add task
         </Button>
-        <Button type="button" variant="outline" size="sm" disabled>
-          <ListChecks className="size-4" />
-          List view
-        </Button>
+        <div className="inline-flex items-center rounded-lg border bg-white p-1">
+          <Button type="button" variant={viewMode === "board" ? "secondary" : "ghost"} size="sm" onClick={() => onViewModeChange("board")}>
+            <LayoutGrid className="size-4" />
+            Board
+          </Button>
+          <Button type="button" variant={viewMode === "list" ? "secondary" : "ghost"} size="sm" onClick={() => onViewModeChange("list")}>
+            <ListChecks className="size-4" />
+            List
+          </Button>
+        </div>
         <div className="flex items-center gap-2 rounded-lg border px-2 py-1">
           <Users className="size-4 text-slate-500" />
           <Select value={assigneeFilter} onValueChange={(value) => onAssigneeFilterChange(value ?? "all")}>

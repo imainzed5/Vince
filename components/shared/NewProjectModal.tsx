@@ -96,6 +96,7 @@ export function NewProjectModal({
         prefix,
         description: description.trim() || null,
         created_by: user.id,
+        owner_id: user.id,
         phase: "planning",
         status: "active",
       };

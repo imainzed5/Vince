@@ -314,6 +314,44 @@ export type Database = {
           },
         ]
       }
+      project_shares: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          expires_at: string | null
+          id: string
+          project_id: string
+          revoked_at: string | null
+          share_token: string
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          project_id: string
+          revoked_at?: string | null
+          share_token: string
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          project_id?: string
+          revoked_at?: string | null
+          share_token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_shares_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_identifier_seq: {
         Row: {
           last_seq: number | null
@@ -344,9 +382,13 @@ export type Database = {
           description: string | null
           id: string
           name: string
+          owner_id: string | null
           phase: string
           prefix: string
+          scope_summary: string | null
           status: string
+          success_metric: string | null
+          target_date: string | null
           workspace_id: string
         }
         Insert: {
@@ -355,9 +397,13 @@ export type Database = {
           description?: string | null
           id?: string
           name: string
+          owner_id?: string | null
           phase?: string
           prefix: string
+          scope_summary?: string | null
           status?: string
+          success_metric?: string | null
+          target_date?: string | null
           workspace_id: string
         }
         Update: {
@@ -366,9 +412,13 @@ export type Database = {
           description?: string | null
           id?: string
           name?: string
+          owner_id?: string | null
           phase?: string
           prefix?: string
+          scope_summary?: string | null
           status?: string
+          success_metric?: string | null
+          target_date?: string | null
           workspace_id?: string
         }
         Relationships: [
@@ -412,6 +462,55 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "standups_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      task_dependencies: {
+        Row: {
+          blocked_task_id: string
+          blocking_task_id: string
+          created_at: string | null
+          created_by: string | null
+          id: string
+          project_id: string
+        }
+        Insert: {
+          blocked_task_id: string
+          blocking_task_id: string
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          project_id: string
+        }
+        Update: {
+          blocked_task_id?: string
+          blocking_task_id?: string
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          project_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_dependencies_blocked_task_id_fkey"
+            columns: ["blocked_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_dependencies_blocking_task_id_fkey"
+            columns: ["blocking_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_dependencies_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"

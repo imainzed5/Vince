@@ -8,6 +8,7 @@ import {
   removeWorkspaceMemberAction,
   updateWorkspaceMemberRoleAction,
 } from "@/app/(app)/workspace/actions";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
@@ -46,7 +47,13 @@ export function MembersView({
   const [isPending, startTransition] = useTransition();
 
   const copyInviteCode = async () => {
-    await navigator.clipboard.writeText(inviteCode);
+    const copiedToClipboard = await copyTextToClipboard(inviteCode);
+
+    if (!copiedToClipboard) {
+      toast.error("Clipboard access was blocked. Focus the tab and try again.");
+      return;
+    }
+
     setCopied(true);
     toast.success("Invite code copied.");
     window.setTimeout(() => setCopied(false), 1500);

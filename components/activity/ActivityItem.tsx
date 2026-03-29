@@ -24,6 +24,10 @@ const activityText: Record<string, (metadata: Record<string, unknown>) => string
   "task.deleted": (m) => `deleted task ${String(m.identifier ?? "") }`,
   "task.comment_added": (m) => `commented on ${String(m.identifier ?? "") }`,
   "task.attachment_added": (m) => `attached a file to ${String(m.identifier ?? "") }`,
+  "task.dependency_added": (m) =>
+    `marked ${String(m.blockedIdentifier ?? "") } as blocked by ${String(m.blockingIdentifier ?? "") }`,
+  "task.dependency_removed": (m) =>
+    `removed the dependency between ${String(m.blockedIdentifier ?? "") } and ${String(m.blockingIdentifier ?? "") }`,
   "note.created": (m) => `added a note \"${String(m.title ?? "") }\"`,
   "note.updated": (m) => `updated note \"${String(m.title ?? "") }\"`,
   "note.pinned": (m) => `pinned note \"${String(m.title ?? "") }\"`,
@@ -41,6 +45,9 @@ const activityText: Record<string, (metadata: Record<string, unknown>) => string
   "project.deleted": (m) => `deleted project \"${String(m.name ?? "") }\"`,
   "project.prefix_updated": (m) =>
     `updated the project prefix from ${String(m.previousPrefix ?? "") } to ${String(m.nextPrefix ?? "") }`,
+  "project.brief_updated": (m) => `updated the project brief (${String((m.fields as string[] | undefined)?.join(", ") ?? "details") })`,
+  "project.share_created": () => "created a client share link",
+  "project.share_revoked": () => "revoked a client share link",
   "workspace.updated": (m) => `updated workspace ${String(m.field ?? "settings")}`,
   "workspace.invite_code_regenerated": () => "regenerated the workspace invite code",
   "member.joined": () => "joined the workspace",

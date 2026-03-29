@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { NotesView } from "@/components/notes/NotesView";
+import { RealtimeRefreshBridge } from "@/components/shared/RealtimeRefreshBridge";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database.types";
 
@@ -41,11 +42,20 @@ export default async function NotesPage({ params }: NotesPageProps) {
   ]);
 
   return (
-    <NotesView
-      workspaceId={workspaceId}
-      projectId={projectId}
-      initialNotes={(data ?? []) as Note[]}
-      isReadOnly={(project as Pick<Project, "status"> | null)?.status === "archived"}
-    />
+    <>
+      <RealtimeRefreshBridge
+        name={`project:${projectId}:notes-refresh`}
+        subscriptions={[
+          { table: "projects", filter: `id=eq.${projectId}` },
+          { table: "workspace_members", filter: `workspace_id=eq.${workspaceId}` },
+        ]}
+      />
+      <NotesView
+        workspaceId={workspaceId}
+        projectId={projectId}
+        initialNotes={(data ?? []) as Note[]}
+        isReadOnly={(project as Pick<Project, "status"> | null)?.status === "archived"}
+      />
+    </>
   );
 }

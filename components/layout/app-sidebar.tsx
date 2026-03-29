@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { MessageCircleMore } from "lucide-react";
@@ -12,6 +12,7 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { useRealtime } from "@/hooks/useRealtime";
 import { getUnreadChatCount } from "@/lib/collaboration";
 import { createClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils";
 import type { Project } from "@/types";
 
 const workspaceNav = [
@@ -52,6 +53,7 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
   const routeWorkspaceId = typeof params.workspaceId === "string" ? params.workspaceId : null;
   const resolvedWorkspaceId = routeWorkspaceId ?? workspaceId;
   const supabase = useMemo(() => createClient(), []);
+  const workspaceRequestRef = useRef(0);
 
   const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const [workspaceMemberCount, setWorkspaceMemberCount] = useState<number | null>(null);
@@ -85,10 +87,10 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
     void loadCurrentUser();
   }, [supabase]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadWorkspaceData = useCallback(
+    async (currentWorkspaceId: string) => {
+      const requestId = ++workspaceRequestRef.current;
 
-    async function loadWorkspaceData(currentWorkspaceId: string) {
       setIsWorkspaceLoading(true);
 
       const [{ data: workspaceData }, { count: memberCount }, { count: projectCount }, { data: projectData }] =
@@ -109,16 +111,22 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
             .order("created_at", { ascending: true }),
         ]);
 
-      if (!cancelled) {
-        setWorkspaceName(workspaceData?.name ?? null);
-        setWorkspaceMemberCount(memberCount ?? 0);
-        setWorkspaceProjectCount(projectCount ?? 0);
-        setWorkspaceProjects((projectData ?? []) as Project[]);
-        setIsWorkspaceLoading(false);
+      if (requestId !== workspaceRequestRef.current) {
+        return;
       }
-    }
 
+      setWorkspaceName(workspaceData?.name ?? null);
+      setWorkspaceMemberCount(memberCount ?? 0);
+      setWorkspaceProjectCount(projectCount ?? 0);
+      setWorkspaceProjects((projectData ?? []) as Project[]);
+      setIsWorkspaceLoading(false);
+    },
+    [supabase],
+  );
+
+  useEffect(() => {
     if (!resolvedWorkspaceId) {
+      workspaceRequestRef.current += 1;
       setWorkspaceName(null);
       setWorkspaceMemberCount(null);
       setWorkspaceProjectCount(null);
@@ -128,11 +136,7 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
     }
 
     void loadWorkspaceData(resolvedWorkspaceId);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projects, resolvedWorkspaceId, supabase]);
+  }, [loadWorkspaceData, projects, resolvedWorkspaceId]);
 
   const activeProjectId = projectMatch?.[1] ?? null;
   const activeProject = workspaceProjects.find((project) => project.id === activeProjectId) ?? null;
@@ -254,158 +258,306 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
     setup: setupReadStateChannel,
   });
 
+  const refreshWorkspaceStructure = useCallback(() => {
+    if (!resolvedWorkspaceId) {
+      return;
+    }
+
+    void loadWorkspaceData(resolvedWorkspaceId);
+  }, [loadWorkspaceData, resolvedWorkspaceId]);
+
+  const setupWorkspaceStructureChannel = useCallback(
+    (channel: RealtimeChannel) =>
+      channel
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "workspaces",
+            filter: resolvedWorkspaceId ? `id=eq.${resolvedWorkspaceId}` : undefined,
+          },
+          () => {
+            refreshWorkspaceStructure();
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "workspace_members",
+            filter: resolvedWorkspaceId ? `workspace_id=eq.${resolvedWorkspaceId}` : undefined,
+          },
+          () => {
+            refreshWorkspaceStructure();
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "projects",
+            filter: resolvedWorkspaceId ? `workspace_id=eq.${resolvedWorkspaceId}` : undefined,
+          },
+          () => {
+            refreshWorkspaceStructure();
+          },
+        ),
+    [refreshWorkspaceStructure, resolvedWorkspaceId],
+  );
+
+  useRealtime({
+    enabled: Boolean(resolvedWorkspaceId),
+    name: resolvedWorkspaceId ? `workspace:${resolvedWorkspaceId}:sidebar-structure` : "workspace:sidebar-structure",
+    supabase,
+    setup: setupWorkspaceStructureChannel,
+  });
+
+  const panelClassName =
+    "rounded-[26px] border border-white/80 bg-white/72 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.88)] supports-[backdrop-filter]:bg-white/60 supports-[backdrop-filter]:backdrop-blur-xl";
+  const sectionLabelClassName =
+    "px-2 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-sidebar-foreground/38";
+
+  const getUtilityLinkClassName = (active: boolean) =>
+    cn(
+      buttonVariants({
+        variant: "ghost",
+        size: "sm",
+        className:
+          "h-8 flex-1 rounded-full border border-white/80 bg-white/60 px-3 text-[0.78rem] font-medium text-sidebar-foreground/72 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] transition-[background-color,border-color,color,box-shadow] duration-200 hover:border-white hover:bg-white/88 hover:text-sidebar-foreground active:translate-y-0",
+      }),
+      active &&
+        "border-sidebar-border/70 bg-white/92 text-sidebar-foreground shadow-[0_12px_24px_-20px_rgba(15,23,42,0.45),inset_0_1px_0_rgba(255,255,255,0.94)] hover:bg-white/92",
+    );
+
+  const getNavItemClassName = ({
+    active,
+    isLocked,
+    withTrailing,
+  }: {
+    active: boolean;
+    isLocked: boolean;
+    withTrailing: boolean;
+  }) =>
+    cn(
+      buttonVariants({
+        variant: "ghost",
+        className:
+          "h-10 rounded-[18px] border border-transparent px-3.5 text-[0.92rem] font-medium shadow-none transition-[background-color,border-color,color,box-shadow] duration-200 active:translate-y-0",
+      }),
+      withTrailing ? "justify-between" : "justify-start",
+      active
+        ? "border-sidebar-border/70 bg-white/84 text-sidebar-foreground shadow-[0_14px_26px_-22px_rgba(15,23,42,0.5),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84"
+        : "text-sidebar-foreground/68 hover:border-white hover:bg-white/64 hover:text-sidebar-foreground",
+      isLocked &&
+        "cursor-not-allowed border-transparent bg-transparent text-sidebar-foreground/34 opacity-100 hover:border-transparent hover:bg-transparent hover:text-sidebar-foreground/34",
+    );
+
+  const getProjectLinkClassName = (active: boolean) =>
+    cn(
+      buttonVariants({
+        variant: "ghost",
+        className:
+          "h-10 rounded-[18px] border border-transparent px-3.5 text-[0.9rem] font-medium shadow-none transition-[background-color,border-color,color,box-shadow] duration-200 active:translate-y-0",
+      }),
+      "w-full justify-start gap-2.5 text-sidebar-foreground/68",
+      active
+        ? "border-sidebar-border/70 bg-white/84 text-sidebar-foreground shadow-[0_14px_26px_-22px_rgba(15,23,42,0.5),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84"
+        : "hover:border-white hover:bg-white/64 hover:text-sidebar-foreground",
+    );
+
   return (
-    <aside className="hidden w-80 border-r bg-white p-4 md:block">
-      <div className="mb-4 rounded-lg border bg-slate-50 p-4">
-        <p className="text-sm text-muted-foreground">Workspace</p>
-        {isWorkspaceLoading ? (
-          <div className="space-y-2 pt-1">
-            <div className="h-5 w-40 animate-pulse rounded bg-slate-200" />
-            <div className="h-4 w-32 animate-pulse rounded bg-slate-200" />
+    <aside className="hidden w-80 shrink-0 border-r border-sidebar-border/55 bg-sidebar/88 px-4 py-5 text-sidebar-foreground md:sticky md:top-0 md:block md:h-screen md:overflow-y-auto md:supports-[backdrop-filter]:bg-sidebar/72 md:supports-[backdrop-filter]:backdrop-blur-2xl">
+      <div className="flex min-h-full flex-col gap-3">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-1.5">
+            <span className="size-2.5 rounded-full bg-rose-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]" />
+            <span className="size-2.5 rounded-full bg-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]" />
+            <span className="size-2.5 rounded-full bg-emerald-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]" />
           </div>
-        ) : !hasSelectedWorkspace ? (
-          <p className="pt-1 text-sm text-muted-foreground">
-            Select a workspace from the workspace list to view its members, projects, and live updates.
-          </p>
-        ) : (
-          <>
-            <p className="truncate text-base font-semibold">{workspaceName ?? "Workspace"}</p>
-            <p className="text-xs text-muted-foreground">
-              {(workspaceMemberCount ?? 0).toLocaleString()} members · {(workspaceProjectCount ?? 0).toLocaleString()} projects
-            </p>
-          </>
-        )}
-
-        <div className="mt-3 flex gap-2">
-          <Link
-            href="/dashboard"
-            className={buttonVariants({
-              variant: pathname === "/dashboard" ? "secondary" : "outline",
-              size: "sm",
-              className: "flex-1",
-            })}
-          >
-            Workspace list
-          </Link>
-          <Link
-            href="/create-workspace"
-            className={buttonVariants({
-              variant: pathname === "/create-workspace" ? "secondary" : "outline",
-              size: "sm",
-              className: "flex-1",
-            })}
-          >
-            Create or join
-          </Link>
+          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-sidebar-foreground/34">Vince</p>
         </div>
-      </div>
 
-      <nav className="mb-6 space-y-2">
-        {workspaceNav.map((item) => {
-          const href = getWorkspaceNavHref(item.key);
-          const active = isWorkspaceNavActive(item.key);
-          const isLocked = item.requiresWorkspace && !hasSelectedWorkspace;
-          const sharedClassName = buttonVariants({
-            variant: active ? "secondary" : "ghost",
-            className: [
-              "w-full",
-              item.key === "chat" && !isLocked && workspaceChatUnreadCount > 0 ? "justify-between" : "justify-start",
-              isLocked
-                ? "cursor-not-allowed text-slate-400 opacity-60 hover:bg-transparent hover:text-slate-400"
-                : null,
-            ].filter(Boolean).join(" "),
-          });
-
-          const content = (
-            <>
-              <span className="inline-flex items-center gap-2">
-                {item.key === "chat" ? <MessageCircleMore className="size-4" /> : null}
-                {item.label}
-              </span>
-              {item.key === "chat" && !isLocked && workspaceChatUnreadCount > 0 ? <Badge>{workspaceChatUnreadCount}</Badge> : null}
-            </>
-          );
-
-          return (
-            <div key={item.key}>
-              {href ? (
-                <Link href={href} className={sharedClassName}>
-                  {content}
-                </Link>
-              ) : (
-                <div
-                  aria-disabled="true"
-                  title="Select a workspace first"
-                  className={sharedClassName}
-                >
-                  {content}
+        <div className={cn(panelClassName, "p-4")}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-sidebar-foreground/38">
+                Current workspace
+              </p>
+              {isWorkspaceLoading ? (
+                <div className="space-y-2 pt-2">
+                  <div className="h-5 w-40 animate-pulse rounded-full bg-white/80" />
+                  <div className="h-4 w-28 animate-pulse rounded-full bg-white/65" />
                 </div>
+              ) : !hasSelectedWorkspace ? (
+                <p className="pt-2 text-sm leading-6 text-sidebar-foreground/56">
+                  Select a workspace from the workspace list to view its members, projects, and live updates.
+                </p>
+              ) : (
+                <>
+                  <p className="truncate pt-2 text-[1.05rem] font-semibold text-sidebar-foreground">
+                    {workspaceName ?? "Workspace"}
+                  </p>
+                  <p className="pt-1 text-sm text-sidebar-foreground/56">
+                    {(workspaceMemberCount ?? 0).toLocaleString()} members · {(workspaceProjectCount ?? 0).toLocaleString()} projects
+                  </p>
+                </>
               )}
             </div>
-          );
-        })}
-      </nav>
-
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Projects</h3>
-      </div>
-      <div className="space-y-1">
-        {workspaceProjects.map((project) => (
-          <Link
-            key={project.id}
-            href={resolvedWorkspaceId ? `/workspace/${resolvedWorkspaceId}/project/${project.id}/board` : "/dashboard"}
-            className={buttonVariants({
-              variant: activeProjectId === project.id ? "secondary" : "ghost",
-              className: "w-full justify-start gap-2",
-            })}
-          >
-            <span className={`size-2 rounded-full ${projectPhaseDot[project.phase] ?? "bg-slate-400"}`} />
-            <span className="truncate">{project.name}</span>
-            {project.status === "archived" ? (
-              <span className="ml-auto text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                Archived
+            {hasSelectedWorkspace ? (
+              <span className="rounded-full border border-white/80 bg-white/78 px-2.5 py-1 text-[0.68rem] font-medium text-sidebar-foreground/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.88)]">
+                Live
               </span>
             ) : null}
-          </Link>
-        ))}
-        {!hasSelectedWorkspace ? (
-          <p className="rounded-lg border border-dashed px-3 py-3 text-sm text-muted-foreground">
-            Pick a workspace first before opening or creating projects.
-          </p>
+          </div>
+
+          {hasSelectedWorkspace && !isWorkspaceLoading ? (
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="rounded-[20px] border border-white/75 bg-white/64 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+                <p className="text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/40">Members</p>
+                <p className="mt-1 text-sm font-semibold text-sidebar-foreground">
+                  {(workspaceMemberCount ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="rounded-[20px] border border-white/75 bg-white/64 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+                <p className="text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/40">Projects</p>
+                <p className="mt-1 text-sm font-semibold text-sidebar-foreground">
+                  {(workspaceProjectCount ?? 0).toLocaleString()}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-4 flex gap-2">
+            <Link href="/dashboard" className={getUtilityLinkClassName(pathname === "/dashboard")}>
+              Workspace list
+            </Link>
+            <Link href="/create-workspace" className={getUtilityLinkClassName(pathname === "/create-workspace")}>
+              Create or join
+            </Link>
+          </div>
+        </div>
+
+        <div className={cn(panelClassName, "p-2")}>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className={sectionLabelClassName}>Workspace</h2>
+            {workspaceChatUnreadCount > 0 ? (
+              <Badge className="border-transparent bg-sidebar-primary/10 px-2 text-[0.68rem] font-medium text-sidebar-primary shadow-none hover:bg-sidebar-primary/10">
+                {workspaceChatUnreadCount} unread
+              </Badge>
+            ) : null}
+          </div>
+
+          <nav className="space-y-1">
+            {workspaceNav.map((item) => {
+              const href = getWorkspaceNavHref(item.key);
+              const active = isWorkspaceNavActive(item.key);
+              const isLocked = item.requiresWorkspace && !hasSelectedWorkspace;
+              const sharedClassName = getNavItemClassName({
+                active,
+                isLocked,
+                withTrailing: item.key === "chat" && !isLocked && workspaceChatUnreadCount > 0,
+              });
+
+              const content = (
+                <>
+                  <span className="inline-flex items-center gap-2.5">
+                    {item.key === "chat" ? <MessageCircleMore className="size-4" /> : null}
+                    {item.label}
+                  </span>
+                  {item.key === "chat" && !isLocked && workspaceChatUnreadCount > 0 ? (
+                    <Badge className="border-transparent bg-sidebar-primary/10 px-2 text-[0.68rem] font-medium text-sidebar-primary shadow-none hover:bg-sidebar-primary/10">
+                      {workspaceChatUnreadCount}
+                    </Badge>
+                  ) : null}
+                </>
+              );
+
+              return (
+                <div key={item.key}>
+                  {href ? (
+                    <Link href={href} className={sharedClassName}>
+                      {content}
+                    </Link>
+                  ) : (
+                    <div aria-disabled="true" title="Select a workspace first" className={sharedClassName}>
+                      {content}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </nav>
+        </div>
+
+        <div className={cn(panelClassName, "p-2")}>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className={sectionLabelClassName}>Projects</h3>
+            {hasSelectedWorkspace ? (
+              <span className="pr-2 text-[0.72rem] font-medium text-sidebar-foreground/42">
+                {workspaceProjects.length.toLocaleString()}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="space-y-1">
+            {workspaceProjects.map((project) => (
+              <Link
+                key={project.id}
+                href={resolvedWorkspaceId ? `/workspace/${resolvedWorkspaceId}/project/${project.id}/board` : "/dashboard"}
+                className={getProjectLinkClassName(activeProjectId === project.id)}
+              >
+                <span className={`size-2 rounded-full ${projectPhaseDot[project.phase] ?? "bg-slate-400"}`} />
+                <span className="truncate">{project.name}</span>
+                {project.status === "archived" ? (
+                  <span className="ml-auto text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/40">
+                    Archived
+                  </span>
+                ) : null}
+              </Link>
+            ))}
+            {!hasSelectedWorkspace ? (
+              <p className="rounded-[20px] border border-dashed border-sidebar-border/60 bg-white/34 px-3 py-3 text-sm leading-6 text-sidebar-foreground/52">
+                Pick a workspace first before opening or creating projects.
+              </p>
+            ) : null}
+          </div>
+
+          <button
+            type="button"
+            disabled={!resolvedWorkspaceId}
+            className="mt-2 w-full rounded-[18px] border border-dashed border-sidebar-border/65 bg-white/42 px-3.5 py-2.5 text-left text-sm font-medium text-sidebar-foreground/58 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] transition-[background-color,border-color,color,box-shadow] duration-200 enabled:cursor-pointer enabled:hover:border-white enabled:hover:bg-white/72 enabled:hover:text-sidebar-foreground"
+            onClick={() => setIsProjectModalOpen(true)}
+          >
+            + New project
+          </button>
+        </div>
+
+        {resolvedWorkspaceId && activeProject ? (
+          <div className={cn(panelClassName, "p-2")}>
+            <div className="mb-2 px-2">
+              <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-sidebar-foreground/38">
+                Project views
+              </p>
+              <p className="mt-1 truncate text-sm font-semibold text-sidebar-foreground">{activeProject.name}</p>
+            </div>
+            <div className="space-y-1">
+              {projectTabs.map((tab) => {
+                const href = `/workspace/${resolvedWorkspaceId}/project/${activeProject.id}/${tab.slug}`;
+                const active = pathname === href;
+
+                return (
+                  <Link key={tab.slug} href={href} className={getNavItemClassName({ active, isLocked: false, withTrailing: false })}>
+                    {tab.label}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
         ) : null}
       </div>
-
-      <button
-        type="button"
-        disabled={!resolvedWorkspaceId}
-        className="mt-2 w-full rounded-lg border border-dashed border-slate-300 px-3 py-2 text-left text-sm text-slate-500 enabled:cursor-pointer enabled:hover:bg-slate-50"
-        onClick={() => setIsProjectModalOpen(true)}
-      >
-        + New project
-      </button>
-
-      {resolvedWorkspaceId && activeProject ? (
-        <div className="mt-6 space-y-2 border-t pt-4">
-          <p className="truncate text-sm font-semibold text-slate-800">{activeProject.name}</p>
-          {projectTabs.map((tab) => {
-            const href = `/workspace/${resolvedWorkspaceId}/project/${activeProject.id}/${tab.slug}`;
-            const active = pathname === href;
-
-            return (
-              <Link
-                key={tab.slug}
-                href={href}
-                className={buttonVariants({
-                  variant: active ? "secondary" : "ghost",
-                  className: "w-full justify-start",
-                })}
-              >
-                {tab.label}
-              </Link>
-            );
-          })}
-        </div>
-      ) : null}
 
       {resolvedWorkspaceId ? (
         <NewProjectModal

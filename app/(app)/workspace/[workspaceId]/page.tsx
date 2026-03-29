@@ -2,12 +2,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { ActivityItem } from "@/components/activity/ActivityItem";
+import { RealtimeRefreshBridge } from "@/components/shared/RealtimeRefreshBridge";
 import { WorkspaceCreatedToast } from "@/components/shared/WorkspaceCreatedToast";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getWorkspaceMemberNames } from "@/lib/supabase/member-names";
 import { createClient } from "@/lib/supabase/server";
 import { getDisplayNameFromEmail } from "@/lib/utils/displayName";
+import { formatCalendarDate } from "@/lib/utils/time";
 import type { Database } from "@/types/database.types";
 
 type WorkspacePageProps = {
@@ -137,6 +139,19 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
   const blockedTaskCount = workspaceTasks.filter((task) => task.is_blocked).length;
   const inFlightTaskCount = workspaceTasks.filter((task) => task.status !== "done").length;
   const unassignedTaskCount = workspaceTasks.filter((task) => !task.assignee_id && task.status !== "done").length;
+  const overdueTaskCount = workspaceTasks.filter((task) => isOverdue(task)).length;
+  const dueSoonTaskCount = workspaceTasks.filter((task) => {
+    if (!task.due_date || task.status === "done") {
+      return false;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueDate = new Date(task.due_date);
+    dueDate.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((dueDate.getTime() - today.getTime()) / 86_400_000);
+    return diffDays >= 0 && diffDays <= 3;
+  }).length;
 
   const projectStats = new Map<string, { taskCount: number; completedCount: number; blockedCount: number }>();
 
@@ -176,11 +191,25 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
 
     return {
       ...project,
+      ownerName: project.owner_id ? memberNames[project.owner_id] ?? `User ${project.owner_id.slice(0, 8)}` : null,
       taskCount: stats.taskCount,
       blockedCount: stats.blockedCount,
       progress,
     };
   });
+
+  const attentionTasks = [...workspaceTasks]
+    .filter((task) => task.status !== "done" && (task.is_blocked || !task.assignee_id || isOverdue(task)))
+    .sort((left, right) => {
+      if (left.is_blocked !== right.is_blocked) {
+        return left.is_blocked ? -1 : 1;
+      }
+
+      const leftDue = left.due_date ? new Date(left.due_date).getTime() : Number.MAX_SAFE_INTEGER;
+      const rightDue = right.due_date ? new Date(right.due_date).getTime() : Number.MAX_SAFE_INTEGER;
+      return leftDue - rightDue;
+    })
+    .slice(0, 6);
 
   const teamSummaries = workspaceMembers
     .map((member) => {
@@ -211,9 +240,19 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
       return left.name.localeCompare(right.name);
     });
 
+  const realtimeSubscriptions = [
+    { table: "workspaces", filter: `id=eq.${workspaceId}` },
+    { table: "workspace_members", filter: `workspace_id=eq.${workspaceId}` },
+    { table: "projects", filter: `workspace_id=eq.${workspaceId}` },
+    { table: "activity_log", filter: `workspace_id=eq.${workspaceId}` },
+    { table: "messages", filter: `workspace_id=eq.${workspaceId}` },
+    ...projectIds.map((id) => ({ table: "tasks", filter: `project_id=eq.${id}` })),
+    ...projectIds.map((id) => ({ table: "notes", filter: `project_id=eq.${id}` })),
+  ];
+
   const projectSearchResults = canRunSearch
     ? projectSummaries.filter((project) => {
-        const haystack = `${project.name} ${project.description ?? ""}`.toLowerCase();
+        const haystack = `${project.name} ${project.description ?? ""} ${project.scope_summary ?? ""} ${project.success_metric ?? ""}`.toLowerCase();
         return haystack.includes(searchableQuery.toLowerCase());
       })
     : [];
@@ -262,6 +301,10 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
 
   return (
     <main className="space-y-6 p-6">
+      <RealtimeRefreshBridge
+        name={`workspace:${workspaceId}:overview-refresh`}
+        subscriptions={realtimeSubscriptions}
+      />
       <WorkspaceCreatedToast />
 
       <section className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border bg-white p-6">
@@ -333,6 +376,99 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
           <CardContent>
             <p className="text-3xl font-semibold text-slate-900">{blockedTaskCount}</p>
             <p className="mt-1 text-sm text-muted-foreground">Resolve these to keep momentum.</p>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+        <Card>
+          <CardHeader>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle>Workspace attention</CardTitle>
+                <p className="text-sm text-muted-foreground">The work most likely to slow delivery across this workspace.</p>
+              </div>
+              <Badge variant="outline">{attentionTasks.length} items</Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-4">
+              <div className="rounded-xl border bg-slate-50 p-3">
+                <p className="text-xs text-muted-foreground">Blocked</p>
+                <p className="mt-1 text-2xl font-semibold text-slate-900">{blockedTaskCount}</p>
+              </div>
+              <div className="rounded-xl border bg-slate-50 p-3">
+                <p className="text-xs text-muted-foreground">Overdue</p>
+                <p className="mt-1 text-2xl font-semibold text-slate-900">{overdueTaskCount}</p>
+              </div>
+              <div className="rounded-xl border bg-slate-50 p-3">
+                <p className="text-xs text-muted-foreground">Due soon</p>
+                <p className="mt-1 text-2xl font-semibold text-slate-900">{dueSoonTaskCount}</p>
+              </div>
+              <div className="rounded-xl border bg-slate-50 p-3">
+                <p className="text-xs text-muted-foreground">Unassigned</p>
+                <p className="mt-1 text-2xl font-semibold text-slate-900">{unassignedTaskCount}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {attentionTasks.length === 0 ? (
+                <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+                  No urgent attention items right now.
+                </div>
+              ) : (
+                attentionTasks.map((task) => (
+                  <Link
+                    key={task.id}
+                    href={`/workspace/${workspaceId}/project/${task.project_id}/board`}
+                    className="block rounded-xl border p-4 transition hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{task.identifier}</Badge>
+                      {task.is_blocked ? <Badge variant="destructive">Blocked</Badge> : null}
+                      {!task.assignee_id ? <Badge variant="secondary">Unassigned</Badge> : null}
+                      {isOverdue(task) ? <Badge variant="destructive">Overdue</Badge> : null}
+                    </div>
+                    <p className="mt-2 font-medium text-slate-900">{task.title}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {projectNameById[task.project_id] ?? "Project"}
+                      {task.assignee_id ? ` · ${memberNames[task.assignee_id] ?? `User ${task.assignee_id.slice(0, 8)}`}` : ""}
+                      {task.due_date ? ` · Due ${formatCalendarDate(task.due_date, { includeYear: true, fallback: "" })}` : ""}
+                    </p>
+                  </Link>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Project briefs</CardTitle>
+            <p className="text-sm text-muted-foreground">See ownership and target dates without opening each project.</p>
+          </CardHeader>
+          <CardContent>
+            {projectSummaries.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">No projects yet.</div>
+            ) : (
+              <div className="space-y-3">
+                {projectSummaries.map((project) => (
+                  <div key={project.id} className="rounded-xl border p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-slate-900">{project.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {project.ownerName ? `Owner: ${project.ownerName}` : "No explicit owner"}
+                          {project.target_date ? ` · Target ${formatCalendarDate(project.target_date, { includeYear: true, fallback: "" })}` : " · No target date"}
+                        </p>
+                      </div>
+                      <Badge variant="outline">{project.progress}%</Badge>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-600">{truncate(project.scope_summary, 120) || truncate(project.description, 120) || "No scope summary yet."}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </section>
@@ -528,7 +664,7 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
                         className="block rounded-lg border px-3 py-2 text-sm transition hover:border-slate-300 hover:bg-slate-50"
                       >
                         <p className="font-medium text-slate-900">{project.name}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{truncate(project.description, 120) || "No project description."}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{truncate(project.scope_summary, 120) || truncate(project.description, 120) || "No project description."}</p>
                       </Link>
                     ))
                   )}

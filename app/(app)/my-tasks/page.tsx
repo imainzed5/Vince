@@ -4,7 +4,7 @@ import { MyTasksView } from "@/components/tasks/MyTasksView";
 import { getWorkspaceMemberNames } from "@/lib/supabase/member-names";
 import { createClient } from "@/lib/supabase/server";
 import { getUserWorkspaceRoute } from "@/lib/workspace";
-import type { Project, Task, Workspace } from "@/types";
+import type { Project, Task, TaskDependency, Workspace } from "@/types";
 import type { Database } from "@/types/database.types";
 
 type Milestone = Database["public"]["Tables"]["milestones"]["Row"];
@@ -53,13 +53,16 @@ export default async function MyTasksPage({ searchParams }: MyTasksPageProps) {
 
   const projectIds = (projects ?? []).map((project) => project.id);
 
-  const [{ data: tasks }, { data: milestones }, memberNamePairs] = await Promise.all([
+  const [{ data: tasks }, { data: milestones }, { data: taskDependencies }, memberNamePairs] = await Promise.all([
     projectIds.length
       ? supabase.from("tasks").select("*").in("project_id", projectIds).order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as Database["public"]["Tables"]["tasks"]["Row"][] }),
     projectIds.length
       ? supabase.from("milestones").select("*").in("project_id", projectIds).order("created_at", { ascending: true })
       : Promise.resolve({ data: [] as Milestone[] }),
+    projectIds.length
+      ? supabase.from("task_dependencies").select("*").in("project_id", projectIds).order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] as Database["public"]["Tables"]["task_dependencies"]["Row"][] }),
     Promise.all(
       workspaceIds.map(async (workspaceId) => [
         workspaceId,
@@ -97,6 +100,7 @@ export default async function MyTasksPage({ searchParams }: MyTasksPageProps) {
     <MyTasksView
       currentUserId={user.id}
       defaultWorkspaceId={defaultWorkspaceId}
+      initialDependencies={(taskDependencies ?? []) as TaskDependency[]}
       initialTasks={(tasks ?? []) as Task[]}
       workspaces={(workspaces ?? []) as Workspace[]}
       projects={(projects ?? []) as Project[]}

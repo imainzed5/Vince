@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "@/components/ui/sonner";
 import {
   DndContext,
@@ -27,8 +28,10 @@ import { BoardToolbar } from "@/components/board/BoardToolbar";
 import { BoardColumn } from "@/components/board/BoardColumn";
 import { TaskCard } from "@/components/board/TaskCard";
 import { QuickCreateModal } from "@/components/board/QuickCreateModal";
+import { TaskListView } from "@/components/tasks/TaskListView";
 import { TaskDetailPanel } from "@/components/tasks/TaskDetailPanel";
 import { useTasks } from "@/hooks/useTasks";
+import { buildTaskDependencyMaps } from "@/lib/task-insights";
 import { useTaskStore } from "@/stores/taskStore";
 import type { Task, TaskPriority, TaskStatus } from "@/types";
 import type { Database } from "@/types/database.types";
@@ -127,6 +130,9 @@ export function BoardView({
   milestones = [],
   currentUserId,
 }: BoardViewProps) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = useMemo(() => createClient(), []);
   const selectedTaskId = useTaskStore((state) => state.selectedTaskId);
   const setSelectedTaskId = useTaskStore((state) => state.setSelectedTaskId);
@@ -134,7 +140,7 @@ export function BoardView({
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
   }, []);
-  const { tasks, setTasks, isLoading } = useTasks({
+  const { tasks, setTasks, dependencies, isLoading } = useTasks({
     projectId,
     supabase,
     onError: showToast,
@@ -173,6 +179,7 @@ export function BoardView({
   }, [assigneeFilter, priorityFilter, tasks]);
 
   const taskGroups = useMemo(() => groupTasks(filteredTasks), [filteredTasks]);
+  const viewMode = searchParams.get("view") === "list" ? "list" : "board";
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedTaskId) ?? null,
     [selectedTaskId, tasks],
@@ -284,6 +291,23 @@ export function BoardView({
         name: memberNameMap[assigneeId] ?? `User ${assigneeId.slice(0, 8)}`,
       })),
     [memberNameMap, uniqueAssignees],
+  );
+  const { blockedByMap, blockingMap } = useMemo(() => buildTaskDependencyMaps(dependencies), [dependencies]);
+
+  const setViewMode = useCallback(
+    (nextViewMode: "board" | "list") => {
+      const nextParams = new URLSearchParams(searchParams.toString());
+
+      if (nextViewMode === "board") {
+        nextParams.delete("view");
+      } else {
+        nextParams.set("view", "list");
+      }
+
+      const nextQuery = nextParams.toString();
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
   );
 
   useEffect(() => {
@@ -530,8 +554,8 @@ export function BoardView({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" disabled>
-              Share client link
+            <Button type="button" variant="outline" onClick={() => router.push(`/workspace/${workspaceId}/project/${projectId}/overview`)}>
+              Project brief
             </Button>
             <Button type="button" onClick={() => openCreateTask("backlog")} disabled={isReadOnly}>
               + Add task
@@ -556,6 +580,7 @@ export function BoardView({
 
       <BoardToolbar
         onCreateTask={() => openCreateTask("backlog")}
+        onViewModeChange={setViewMode}
         createDisabled={isReadOnly}
         assigneeOptions={assigneeOptions}
         assigneeFilter={assigneeFilter}
@@ -564,10 +589,20 @@ export function BoardView({
         onPriorityFilterChange={setPriorityFilter}
         visibleTaskCount={filteredTasks.length}
         totalTaskCount={tasks.length}
+        viewMode={viewMode}
       />
 
       {isLoading ? (
         <div className="rounded-lg border bg-white p-6 text-sm text-slate-500">Loading board...</div>
+      ) : viewMode === "list" ? (
+        <TaskListView
+          tasks={filteredTasks}
+          milestones={milestones}
+          memberNameMap={memberNameMap}
+          blockedByMap={blockedByMap}
+          blockingMap={blockingMap}
+          onOpenTask={openTaskPanel}
+        />
       ) : (
         <DndContext
           sensors={sensors}
@@ -584,6 +619,8 @@ export function BoardView({
                 status={column.status}
                 color={column.dotColor}
                 tasks={taskGroups[column.status]}
+                blockedByMap={blockedByMap}
+                blockingMap={blockingMap}
                 onAddTask={openCreateTask}
                 addDisabled={isReadOnly}
                 onOpenTask={openTaskPanel}
@@ -639,6 +676,7 @@ export function BoardView({
         projectId={projectId}
         task={selectedTask}
         tasks={tasks}
+        dependencies={dependencies}
         milestones={milestones}
         members={members}
         currentUserId={currentUserId}

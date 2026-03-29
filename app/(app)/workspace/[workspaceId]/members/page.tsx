@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import { MembersView, type MemberListItem } from "@/components/shared/MembersView";
+import { RealtimeRefreshBridge } from "@/components/shared/RealtimeRefreshBridge";
 import { createClient } from "@/lib/supabase/server";
 import { getDisplayNameFromEmail } from "@/lib/utils/displayName";
 import type { Database } from "@/types/database.types";
@@ -105,12 +106,21 @@ export default async function WorkspaceMembersPage({ params }: WorkspaceMembersP
   const currentMembership = memberRows.find((member) => member.user_id === user.id) ?? null;
 
   return (
-    <MembersView
-      workspaceId={workspaceId}
-      inviteCode={workspace.invite_code}
-      currentUserId={user.id}
-      currentUserRole={currentMembership?.role ?? "member"}
-      members={memberItems}
-    />
+    <>
+      <RealtimeRefreshBridge
+        name={`workspace:${workspaceId}:members-refresh`}
+        subscriptions={[
+          { table: "workspaces", filter: `id=eq.${workspaceId}` },
+          { table: "workspace_members", filter: `workspace_id=eq.${workspaceId}` },
+        ]}
+      />
+      <MembersView
+        workspaceId={workspaceId}
+        inviteCode={workspace.invite_code}
+        currentUserId={user.id}
+        currentUserRole={currentMembership?.role ?? "member"}
+        members={memberItems}
+      />
+    </>
   );
 }

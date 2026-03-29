@@ -27,6 +27,10 @@ type NotificationInboxProps = {
   workspaceId: string;
 };
 
+function isReminder(notification: NotificationRow): boolean {
+  return notification.type.startsWith("task.due") || notification.type === "task.overdue" || notification.type === "task.blocked_stale";
+}
+
 function getNotificationHref(notification: NotificationRow): string {
   if (notification.type.startsWith("chat.")) {
     return notification.project_id
@@ -215,6 +219,7 @@ export function NotificationInbox({ workspaceId }: NotificationInboxProps) {
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-medium text-slate-900">{notification.title}</p>
+                      {isReminder(notification) ? <Badge variant="outline">Reminder</Badge> : null}
                       {!notification.read_at ? <Badge variant="secondary">Unread</Badge> : null}
                     </div>
                     {notification.body ? (

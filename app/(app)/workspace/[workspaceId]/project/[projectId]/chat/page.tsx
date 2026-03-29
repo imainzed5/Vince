@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { ChatView } from "@/components/chat/ChatView";
+import { RealtimeRefreshBridge } from "@/components/shared/RealtimeRefreshBridge";
 import { getWorkspaceMemberNames } from "@/lib/supabase/member-names";
 import { createClient } from "@/lib/supabase/server";
 
@@ -35,11 +36,20 @@ export default async function ProjectChatPage({ params }: ProjectChatPageProps) 
   });
 
   return (
-    <ChatView
-      workspaceId={workspaceId}
-      projectId={projectId}
-      readOnly={(project?.status ?? "active") === "archived"}
-      memberNames={memberNames}
-    />
+    <>
+      <RealtimeRefreshBridge
+        name={`project:${projectId}:chat-refresh`}
+        subscriptions={[
+          { table: "projects", filter: `id=eq.${projectId}` },
+          { table: "workspace_members", filter: `workspace_id=eq.${workspaceId}` },
+        ]}
+      />
+      <ChatView
+        workspaceId={workspaceId}
+        projectId={projectId}
+        readOnly={(project?.status ?? "active") === "archived"}
+        memberNames={memberNames}
+      />
+    </>
   );
 }

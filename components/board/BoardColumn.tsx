@@ -11,6 +11,8 @@ import { TaskCard } from "@/components/board/TaskCard";
 import type { Task, TaskStatus } from "@/types";
 
 type BoardColumnProps = {
+  blockedByMap?: Record<string, string[]>;
+  blockingMap?: Record<string, string[]>;
   label: string;
   status: TaskStatus;
   color: string;
@@ -25,6 +27,8 @@ type BoardColumnProps = {
 };
 
 export function BoardColumn({
+  blockedByMap = {},
+  blockingMap = {},
   label,
   status,
   color,
@@ -102,6 +106,8 @@ export function BoardColumn({
           {tasks.map((task) => (
             <TaskCard
               key={task.id}
+              blockedByCount={blockedByMap[task.id]?.length ?? 0}
+              blockingCount={blockingMap[task.id]?.length ?? 0}
               task={task}
               onOpenTask={onOpenTask}
               isDragDisabled={isDragDisabled}

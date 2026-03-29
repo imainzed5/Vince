@@ -11,6 +11,8 @@ import { PRIORITY_CONFIG } from "@/components/board/config";
 import type { Task } from "@/types";
 
 type TaskCardProps = {
+  blockedByCount?: number;
+  blockingCount?: number;
   task: Task;
   onOpenTask: (taskId: string) => void;
   isDragDisabled?: boolean;
@@ -37,6 +39,8 @@ function toDateLabel(value: string | null): string | null {
 }
 
 export function TaskCard({
+  blockedByCount = 0,
+  blockingCount = 0,
   task,
   onOpenTask,
   isDragDisabled = false,
@@ -55,6 +59,7 @@ export function TaskCard({
   });
 
   const dueLabel = useMemo(() => toDateLabel(task.due_date), [task.due_date]);
+  const isBlocked = task.is_blocked || blockedByCount > 0;
   const isOverdue =
     Boolean(task.due_date) &&
     task.status !== "done" &&
@@ -80,7 +85,7 @@ export function TaskCard({
         isInteractive && "cursor-grab hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md active:scale-[0.99] active:cursor-grabbing active:shadow-sm",
         !isInteractive && !isOverlay && "cursor-pointer",
         isOverlay && "pointer-events-none scale-[1.02] shadow-2xl ring-1 ring-blue-200 animate-board-overlay-float",
-        task.is_blocked ? "border-l-2 border-l-red-500" : "border-slate-200",
+        isBlocked ? "border-l-2 border-l-red-500" : "border-slate-200",
         task.status === "done" && "opacity-60",
         isHighlighted && !isOverlay && "animate-board-task-highlight",
         isEntering && !isOverlay && "animate-board-task-enter",
@@ -94,8 +99,11 @@ export function TaskCard({
         <span className={cn("size-2 rounded-full", priority.color)} title={priority.label} />
       </div>
       <p className={cn("text-sm font-medium text-slate-900", task.status === "done" && "line-through")}>{task.title}</p>
-      {task.is_blocked && task.blocked_reason ? (
+      {isBlocked && task.blocked_reason ? (
         <p className="mt-1 text-xs text-red-600">Blocked: {task.blocked_reason}</p>
+      ) : null}
+      {blockedByCount > 0 && !task.blocked_reason ? (
+        <p className="mt-1 text-xs text-red-600">Blocked by {blockedByCount} task{blockedByCount === 1 ? "" : "s"}</p>
       ) : null}
       <div className="mt-3 flex items-center justify-between gap-2">
         <Avatar size="sm">
@@ -110,6 +118,7 @@ export function TaskCard({
           <span className="text-xs text-slate-400">No due date</span>
         )}
       </div>
+      {blockingCount > 0 ? <p className="mt-2 text-xs text-blue-700">Blocks {blockingCount} task{blockingCount === 1 ? "" : "s"}</p> : null}
     </article>
   );
 }

@@ -1,16 +1,23 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition, type FormEvent } from "react";
-import { Archive, LoaderCircle, Plus, Save, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from "react";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import { Archive, Copy, Link2, LoaderCircle, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 
 import { RelativeTimeText } from "@/components/shared/RelativeTimeText";
+import { useRealtime } from "@/hooks/useRealtime";
+import { copyTextToClipboard } from "@/lib/clipboard";
+import { createClient } from "@/lib/supabase/client";
 import {
   addMilestoneAction,
   addStandupAction,
+  createProjectShareAction,
   deleteMilestoneAction,
   deleteProjectAction,
+  revokeProjectShareAction,
+  updateProjectBriefAction,
   updateProjectDetailsAction,
   updateProjectPhaseAction,
   updateProjectPrefixAction,
@@ -29,23 +36,61 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { deriveProjectPrefix, normalizeProjectPrefix } from "@/lib/project-prefix";
 import { formatCalendarDate } from "@/lib/utils/time";
 import type { Database } from "@/types/database.types";
 
 type Project = Database["public"]["Tables"]["projects"]["Row"];
+type ProjectShare = Database["public"]["Tables"]["project_shares"]["Row"];
 type Task = Database["public"]["Tables"]["tasks"]["Row"];
 type Milestone = Database["public"]["Tables"]["milestones"]["Row"];
 type Standup = Database["public"]["Tables"]["standups"]["Row"];
+
+type MemberOption = {
+  id: string;
+  name: string;
+  role: string;
+};
+
+function upsertById<T extends { id: string }>(items: T[], nextItem: T): T[] {
+  const index = items.findIndex((item) => item.id === nextItem.id);
+
+  if (index === -1) {
+    return [...items, nextItem];
+  }
+
+  return items.map((item) => (item.id === nextItem.id ? nextItem : item));
+}
+
+function sortMilestones(items: Milestone[]): Milestone[] {
+  return [...items].sort(
+    (left, right) => new Date(left.created_at ?? 0).getTime() - new Date(right.created_at ?? 0).getTime(),
+  );
+}
+
+function sortStandups(items: Standup[]): Standup[] {
+  return [...items]
+    .sort((left, right) => new Date(right.created_at ?? 0).getTime() - new Date(left.created_at ?? 0).getTime())
+    .slice(0, 3);
+}
 
 type OverviewClientProps = {
   workspaceId: string;
   projectId: string;
   initialProject: Project;
+  initialProjectShares: ProjectShare[];
   initialTasks: Task[];
   initialMilestones: Milestone[];
   initialStandups: Standup[];
   currentUserRole: string;
+  memberOptions: MemberOption[];
   memberNames: Record<string, string>;
   renderedAt?: number;
 };
@@ -72,20 +117,29 @@ export default function OverviewClient({
   workspaceId,
   projectId,
   initialProject,
+  initialProjectShares,
   initialTasks,
   initialMilestones,
   initialStandups,
   currentUserRole,
+  memberOptions,
   memberNames,
   renderedAt,
 }: OverviewClientProps) {
   const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
   const [project, setProject] = useState<Project>(initialProject);
+  const [projectShares, setProjectShares] = useState<ProjectShare[]>(initialProjectShares);
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [milestones, setMilestones] = useState<Milestone[]>(initialMilestones);
   const [standups, setStandups] = useState<Standup[]>(initialStandups);
+  const [hasRemoteProjectUpdate, setHasRemoteProjectUpdate] = useState(false);
   const [nameDraft, setNameDraft] = useState(initialProject.name);
   const [descriptionDraft, setDescriptionDraft] = useState(initialProject.description ?? "");
+  const [ownerDraft, setOwnerDraft] = useState(initialProject.owner_id ?? "unassigned");
+  const [targetDateDraft, setTargetDateDraft] = useState(initialProject.target_date ?? "");
+  const [successMetricDraft, setSuccessMetricDraft] = useState(initialProject.success_metric ?? "");
+  const [scopeSummaryDraft, setScopeSummaryDraft] = useState(initialProject.scope_summary ?? "");
   const [milestoneName, setMilestoneName] = useState("");
   const [milestoneDueDate, setMilestoneDueDate] = useState("");
   const [standupDone, setStandupDone] = useState("");
@@ -93,22 +147,58 @@ export default function OverviewClient({
   const [standupBlockers, setStandupBlockers] = useState("");
   const [isStandupModalOpen, setIsStandupModalOpen] = useState(false);
   const [prefixDraft, setPrefixDraft] = useState(initialProject.prefix);
+  const [shareExpiryDraft, setShareExpiryDraft] = useState("");
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [pendingMilestoneId, setPendingMilestoneId] = useState<string | null>(null);
   const [isSavingDetails, startSavingDetails] = useTransition();
+  const [isSavingBrief, startSavingBrief] = useTransition();
   const [isSavingPrefix, startSavingPrefix] = useTransition();
   const [isUpdatingPhase, startUpdatingPhase] = useTransition();
   const [isUpdatingStatus, startUpdatingStatus] = useTransition();
   const [isCreatingMilestone, startCreatingMilestone] = useTransition();
   const [isDeletingMilestone, startDeletingMilestone] = useTransition();
   const [isPostingStandup, startPostingStandup] = useTransition();
+  const [isCreatingShare, startCreatingShare] = useTransition();
+  const [pendingShareId, setPendingShareId] = useState<string | null>(null);
+  const [isRevokingShare, startRevokingShare] = useTransition();
   const [isDeletingProject, startDeletingProject] = useTransition();
+  const generalDirtyRef = useRef(false);
+  const briefDirtyRef = useRef(false);
+  const prefixDirtyRef = useRef(false);
 
   const totalTasks = tasks.length;
   const completedTasks = tasks.filter((task) => task.status === "done").length;
   const inProgressTasks = tasks.filter((task) => task.status === "in_progress").length;
   const blockedTasks = tasks.filter((task) => task.is_blocked).length;
   const progressPct = totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  const overdueTasks = tasks.filter(
+    (task) => task.due_date && task.status !== "done" && new Date(task.due_date).getTime() < new Date().setHours(0, 0, 0, 0),
+  );
+  const dueSoonTasks = tasks.filter((task) => {
+    if (!task.due_date || task.status === "done") {
+      return false;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueDate = new Date(task.due_date);
+    dueDate.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((dueDate.getTime() - today.getTime()) / 86_400_000);
+    return diffDays >= 0 && diffDays <= 3;
+  });
+  const unassignedTasks = tasks.filter((task) => !task.assignee_id && task.status !== "done");
+  const attentionTasks = [...tasks]
+    .filter((task) => task.status !== "done" && (task.is_blocked || !task.assignee_id || overdueTasks.some((candidate) => candidate.id === task.id)))
+    .sort((left, right) => {
+      if (left.is_blocked !== right.is_blocked) {
+        return left.is_blocked ? -1 : 1;
+      }
+
+      const leftDue = left.due_date ? new Date(left.due_date).getTime() : Number.MAX_SAFE_INTEGER;
+      const rightDue = right.due_date ? new Date(right.due_date).getTime() : Number.MAX_SAFE_INTEGER;
+      return leftDue - rightDue;
+    })
+    .slice(0, 5);
 
   const milestoneTaskCount = useMemo(() => {
     const map = new Map<string, number>();
@@ -132,7 +222,24 @@ export default function OverviewClient({
   const suggestedPrefix = useMemo(() => deriveProjectPrefix(project.name), [project.name]);
   const hasGeneralChanges =
     nameDraft.trim() !== project.name || (descriptionDraft.trim() || "") !== (project.description ?? "");
+  const hasBriefChanges =
+    ownerDraft !== (project.owner_id ?? "unassigned") ||
+    targetDateDraft !== (project.target_date ?? "") ||
+    (successMetricDraft.trim() || "") !== (project.success_metric ?? "") ||
+    (scopeSummaryDraft.trim() || "") !== (project.scope_summary ?? "");
   const canDeleteProject = deleteConfirmation.trim() === project.name;
+
+  useEffect(() => {
+    generalDirtyRef.current = hasGeneralChanges;
+  }, [hasGeneralChanges]);
+
+  useEffect(() => {
+    briefDirtyRef.current = hasBriefChanges;
+  }, [hasBriefChanges]);
+
+  useEffect(() => {
+    prefixDirtyRef.current = normalizeProjectPrefix(prefixDraft) !== project.prefix;
+  }, [prefixDraft, project.prefix]);
 
   const displayMemberName = (userId: string | null) => {
     if (!userId) {
@@ -142,12 +249,157 @@ export default function OverviewClient({
     return memberNames[userId] ?? `User ${userId.slice(0, 8)}`;
   };
 
-  const syncProject = (nextProject: Project) => {
+  const syncProject = useCallback((nextProject: Project) => {
     setProject(nextProject);
     setNameDraft(nextProject.name);
     setDescriptionDraft(nextProject.description ?? "");
+    setOwnerDraft(nextProject.owner_id ?? "unassigned");
+    setTargetDateDraft(nextProject.target_date ?? "");
+    setSuccessMetricDraft(nextProject.success_metric ?? "");
+    setScopeSummaryDraft(nextProject.scope_summary ?? "");
     setPrefixDraft(nextProject.prefix);
-  };
+    setHasRemoteProjectUpdate(false);
+  }, []);
+
+  const applyRemoteProject = useCallback((nextProject: Project) => {
+    setProject(nextProject);
+
+    if (!generalDirtyRef.current) {
+      setNameDraft(nextProject.name);
+      setDescriptionDraft(nextProject.description ?? "");
+    }
+
+    if (!briefDirtyRef.current) {
+      setOwnerDraft(nextProject.owner_id ?? "unassigned");
+      setTargetDateDraft(nextProject.target_date ?? "");
+      setSuccessMetricDraft(nextProject.success_metric ?? "");
+      setScopeSummaryDraft(nextProject.scope_summary ?? "");
+    }
+
+    if (!prefixDirtyRef.current) {
+      setPrefixDraft(nextProject.prefix);
+    }
+
+    if (generalDirtyRef.current || briefDirtyRef.current || prefixDirtyRef.current) {
+      setHasRemoteProjectUpdate(true);
+    }
+  }, []);
+
+  const setupRealtimeChannel = useCallback(
+    (channel: RealtimeChannel) =>
+      channel
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "projects",
+            filter: `id=eq.${projectId}`,
+          },
+          (payload) => {
+            if (payload.eventType === "DELETE") {
+              toast.error("This project was removed in another session.");
+              router.push(`/workspace/${workspaceId}`);
+              router.refresh();
+              return;
+            }
+
+            applyRemoteProject(payload.new as Project);
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "tasks",
+            filter: `project_id=eq.${projectId}`,
+          },
+          (payload) => {
+            const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as Task;
+
+            if (payload.eventType === "DELETE") {
+              setTasks((current) => current.filter((task) => task.id !== row.id));
+              return;
+            }
+
+            setTasks((current) => upsertById(current, row));
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "milestones",
+            filter: `project_id=eq.${projectId}`,
+          },
+          (payload) => {
+            const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as Milestone;
+
+            if (payload.eventType === "DELETE") {
+              setMilestones((current) => current.filter((milestone) => milestone.id !== row.id));
+              setTasks((current) =>
+                current.map((task) => (task.milestone_id === row.id ? { ...task, milestone_id: null } : task)),
+              );
+              return;
+            }
+
+            setMilestones((current) => sortMilestones(upsertById(current, row)));
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "standups",
+            filter: `project_id=eq.${projectId}`,
+          },
+          (payload) => {
+            const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as Standup;
+
+            if (payload.eventType === "DELETE") {
+              setStandups((current) => current.filter((standup) => standup.id !== row.id));
+              return;
+            }
+
+            setStandups((current) => sortStandups(upsertById(current, row)));
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "project_shares",
+            filter: `project_id=eq.${projectId}`,
+          },
+          (payload) => {
+            const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as ProjectShare;
+
+            if (payload.eventType === "DELETE") {
+              setProjectShares((current) => current.filter((share) => share.id !== row.id));
+              return;
+            }
+
+            if (payload.eventType === "INSERT") {
+              setProjectShares((current) => [row, ...current.filter((share) => share.id !== row.id)]);
+              return;
+            }
+
+            setProjectShares((current) => current.map((share) => (share.id === row.id ? row : share)).filter((share) => !share.revoked_at));
+          },
+        ),
+    [applyRemoteProject, projectId, router, workspaceId],
+  );
+
+  const { connected: realtimeConnected } = useRealtime({
+    enabled: Boolean(projectId),
+    name: `project:${projectId}:overview`,
+    supabase,
+    setup: setupRealtimeChannel,
+  });
 
   const saveProjectDetails = () => {
     startSavingDetails(async () => {
@@ -156,6 +408,31 @@ export default function OverviewClient({
         projectId,
         name: nameDraft,
         description: descriptionDraft,
+      });
+
+      if (result.status === "error") {
+        toast.error(result.message);
+        return;
+      }
+
+      if (result.project) {
+        syncProject(result.project);
+      }
+
+      toast.success(result.message);
+      router.refresh();
+    });
+  };
+
+  const saveProjectBrief = () => {
+    startSavingBrief(async () => {
+      const result = await updateProjectBriefAction({
+        workspaceId,
+        projectId,
+        ownerId: ownerDraft === "unassigned" ? "" : ownerDraft,
+        targetDate: targetDateDraft,
+        successMetric: successMetricDraft,
+        scopeSummary: scopeSummaryDraft,
       });
 
       if (result.status === "error") {
@@ -350,6 +627,75 @@ export default function OverviewClient({
     });
   };
 
+  const copyShareUrl = async (shareUrl: string) => {
+    const copied = await copyTextToClipboard(shareUrl);
+
+    if (copied) {
+      toast.success("Share link copied to clipboard.");
+      return;
+    }
+
+    toast.error("Clipboard access was blocked. Focus the tab and try again.");
+  };
+
+  const createShareLink = () => {
+    startCreatingShare(async () => {
+      const result = await createProjectShareAction({
+        workspaceId,
+        projectId,
+        expiresAt: shareExpiryDraft,
+      });
+
+      if (result.status === "error") {
+        toast.error(result.message);
+        return;
+      }
+
+      if (result.share) {
+        setProjectShares((current) => [result.share as ProjectShare, ...current.filter((share) => share.id !== result.share?.id)]);
+      }
+
+      if (result.sharePath) {
+        const shareUrl = new URL(result.sharePath, window.location.origin).toString();
+        const copied = await copyTextToClipboard(shareUrl);
+
+        toast.success(
+          copied
+            ? "Share link created and copied to clipboard."
+            : "Share link created. Use Copy to copy it if the browser blocked clipboard access.",
+        );
+      } else {
+        toast.success(result.message);
+      }
+
+      setShareExpiryDraft("");
+      router.refresh();
+    });
+  };
+
+  const revokeShare = (shareId: string) => {
+    setPendingShareId(shareId);
+
+    startRevokingShare(async () => {
+      const result = await revokeProjectShareAction({
+        workspaceId,
+        projectId,
+        shareId,
+      });
+
+      setPendingShareId(null);
+
+      if (result.status === "error") {
+        toast.error(result.message);
+        return;
+      }
+
+      setProjectShares((current) => current.filter((share) => share.id !== shareId));
+      toast.success(result.message);
+      router.refresh();
+    });
+  };
+
   return (
     <main className="space-y-6 p-6">
       <header className="space-y-2">
@@ -359,10 +705,16 @@ export default function OverviewClient({
           <Badge variant={project.status === "archived" ? "secondary" : "outline"}>
             {project.status === "archived" ? "Archived" : "Active"}
           </Badge>
+          <Badge variant="outline">{realtimeConnected ? "Live" : "Connecting..."}</Badge>
         </div>
         <p className="text-sm text-muted-foreground">
           {project.description?.trim() || "Project overview, milestones, standups, and lifecycle controls."}
         </p>
+        {hasRemoteProjectUpdate ? (
+          <p className="text-xs text-amber-700">
+            A teammate updated this project while you were editing. Your local draft is preserved until you save or refresh.
+          </p>
+        ) : null}
       </header>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -382,6 +734,187 @@ export default function OverviewClient({
           <p className="text-xs text-muted-foreground">Blocked</p>
           <p className="text-2xl font-semibold">{blockedTasks}</p>
         </div>
+      </section>
+
+      <section className="rounded-lg border bg-white p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Project brief</p>
+            <p className="text-xs text-muted-foreground">Define the owner, delivery target, success metric, and scope in one place.</p>
+          </div>
+          <Badge variant="outline">Planning spine</Badge>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-2">
+            <Label>Project owner</Label>
+            <Select value={ownerDraft} onValueChange={(value) => setOwnerDraft(value ?? "unassigned")} disabled={!isOwner || isSavingBrief || isDeletingProject}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unassigned">No explicit owner</SelectItem>
+                {memberOptions.map((member) => (
+                  <SelectItem key={member.id} value={member.id}>
+                    {member.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="project-target-date">Target date</Label>
+            <Input
+              id="project-target-date"
+              type="date"
+              value={targetDateDraft}
+              onChange={(event) => setTargetDateDraft(event.target.value)}
+              disabled={!isOwner || isSavingBrief || isDeletingProject}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="project-success-metric">Success metric</Label>
+            <Input
+              id="project-success-metric"
+              value={successMetricDraft}
+              onChange={(event) => setSuccessMetricDraft(event.target.value)}
+              disabled={!isOwner || isSavingBrief || isDeletingProject}
+              placeholder="Launch landing page with stakeholder approval"
+            />
+          </div>
+
+          <div className="space-y-2 lg:col-span-2">
+            <Label htmlFor="project-scope-summary">Scope summary</Label>
+            <textarea
+              id="project-scope-summary"
+              value={scopeSummaryDraft}
+              onChange={(event) => setScopeSummaryDraft(event.target.value)}
+              className="min-h-[120px] w-full resize-y rounded-lg border border-slate-200 p-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+              disabled={!isOwner || isSavingBrief || isDeletingProject}
+              placeholder="Capture the intended outcome, the boundaries of this project, and what success looks like."
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs text-muted-foreground">
+            {project.owner_id ? `Current owner: ${memberNames[project.owner_id] ?? `User ${project.owner_id.slice(0, 8)}`}` : "No explicit owner assigned yet."}
+          </div>
+          <Button type="button" onClick={saveProjectBrief} disabled={!isOwner || !hasBriefChanges || isSavingBrief}>
+            {isSavingBrief ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
+            Save brief
+          </Button>
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
+        <div className="rounded-lg border bg-white p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Attention queue</p>
+              <p className="text-xs text-muted-foreground">Highlight the work most likely to stall delivery.</p>
+            </div>
+            <Badge variant="outline">{attentionTasks.length} items</Badge>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border bg-slate-50 p-3">
+              <p className="text-xs text-muted-foreground">Overdue</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">{overdueTasks.length}</p>
+            </div>
+            <div className="rounded-lg border bg-slate-50 p-3">
+              <p className="text-xs text-muted-foreground">Due soon</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">{dueSoonTasks.length}</p>
+            </div>
+            <div className="rounded-lg border bg-slate-50 p-3">
+              <p className="text-xs text-muted-foreground">Unassigned</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">{unassignedTasks.length}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {attentionTasks.length === 0 ? (
+              <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No urgent attention items right now.</p>
+            ) : (
+              attentionTasks.map((task) => (
+                <div key={task.id} className="rounded-lg border bg-slate-50 p-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{task.identifier}</Badge>
+                    {task.is_blocked ? <Badge variant="destructive">Blocked</Badge> : null}
+                    {!task.assignee_id ? <Badge variant="secondary">Unassigned</Badge> : null}
+                    {overdueTasks.some((candidate) => candidate.id === task.id) ? <Badge variant="destructive">Overdue</Badge> : null}
+                  </div>
+                  <p className="mt-2 font-medium text-slate-900">{task.title}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {task.assignee_id ? `Owner: ${displayMemberName(task.assignee_id)}` : "No assignee"}
+                    {task.due_date ? ` · Due ${formatDate(task.due_date)}` : ""}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <section className="rounded-lg border bg-white p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Client sharing</p>
+              <p className="text-xs text-muted-foreground">Create read-only share links for project snapshots.</p>
+            </div>
+            <Badge variant="outline">{projectShares.length} active</Badge>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-[220px_auto] md:items-end">
+            <div className="space-y-2">
+              <Label htmlFor="share-expiry">Expires on</Label>
+              <Input id="share-expiry" type="date" value={shareExpiryDraft} onChange={(event) => setShareExpiryDraft(event.target.value)} disabled={!isOwner || isCreatingShare} />
+            </div>
+            <Button type="button" onClick={createShareLink} disabled={!isOwner || isCreatingShare}>
+              {isCreatingShare ? <LoaderCircle className="size-4 animate-spin" /> : <Link2 className="size-4" />}
+              Create share link
+            </Button>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {projectShares.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No active client share links yet.</div>
+            ) : (
+              projectShares.map((share) => {
+                const shareBaseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+                const shareUrl = shareBaseUrl
+                  ? new URL(`/share/${share.share_token}`, shareBaseUrl).toString()
+                  : `/share/${share.share_token}`;
+
+                return (
+                  <div key={share.id} className="rounded-lg border bg-slate-50 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-slate-900">{shareUrl}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Created <RelativeTimeText value={share.created_at} initialReferenceTime={renderedAt} />
+                          {share.expires_at ? ` · Expires ${formatDate(share.expires_at)}` : " · No expiry"}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={() => void copyShareUrl(shareUrl)}>
+                          <Copy className="size-4" />
+                          Copy
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => revokeShare(share.id)} disabled={!isOwner || (isRevokingShare && pendingShareId === share.id)}>
+                          {isRevokingShare && pendingShareId === share.id ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                          Revoke
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </section>
       </section>
 
       <section className="rounded-lg border bg-white p-4">

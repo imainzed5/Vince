@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { RealtimeRefreshBridge } from "@/components/shared/RealtimeRefreshBridge";
 import { WorkspaceSettingsView } from "@/components/shared/WorkspaceSettingsView";
 import { createClient } from "@/lib/supabase/server";
 
@@ -39,12 +40,21 @@ export default async function WorkspaceSettingsPage({ params }: WorkspaceSetting
   }
 
   return (
-    <WorkspaceSettingsView
-      workspaceId={workspace.id}
-      initialName={workspace.name}
-      initialInviteCode={workspace.invite_code}
-      createdAt={workspace.created_at}
-      currentUserRole={membership.role}
-    />
+    <>
+      <RealtimeRefreshBridge
+        name={`workspace:${workspaceId}:settings-refresh`}
+        subscriptions={[
+          { table: "workspaces", filter: `id=eq.${workspaceId}` },
+          { table: "workspace_members", filter: `workspace_id=eq.${workspaceId}` },
+        ]}
+      />
+      <WorkspaceSettingsView
+        workspaceId={workspace.id}
+        initialName={workspace.name}
+        initialInviteCode={workspace.invite_code}
+        createdAt={workspace.created_at}
+        currentUserRole={membership.role}
+      />
+    </>
   );
 }

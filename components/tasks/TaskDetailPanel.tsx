@@ -1,8 +1,11 @@
 "use client";
 
 import {
+  startTransition,
+  useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
   type ChangeEvent,
@@ -12,15 +15,21 @@ import {
   CalendarDays,
   Download,
   History,
+  Link2,
   LoaderCircle,
   MessageSquareText,
   Paperclip,
+  Plus,
   Save,
   ShieldAlert,
   Trash2,
 } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 
+import {
+  addTaskDependencyAction,
+  removeTaskDependencyAction,
+} from "@/app/(app)/workspace/[workspaceId]/project/[projectId]/actions";
 import { ActivityItem } from "@/components/activity/ActivityItem";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { BOARD_COLUMNS, PRIORITY_CONFIG } from "@/components/board/config";
@@ -44,30 +53,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useTaskThread } from "@/hooks/useTaskThread";
 import { extractMentionedUserIds, insertNotifications } from "@/lib/collaboration";
 import { insertActivity } from "@/lib/supabase/activity";
 import { createClient } from "@/lib/supabase/client";
+import { buildTaskDependencyMaps, getTaskDueState } from "@/lib/task-insights";
 import { cn } from "@/lib/utils";
 import { toRelativeTime } from "@/lib/utils/time";
-import type { Task, TaskPriority, TaskStatus } from "@/types";
+import type { Task, TaskDependency, TaskPriority, TaskStatus } from "@/types";
 import type { Database } from "@/types/database.types";
 
 const TASK_ATTACHMENTS_BUCKET = "task-attachments";
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
 type Milestone = Database["public"]["Tables"]["milestones"]["Row"];
-type TaskComment = Database["public"]["Tables"]["task_comments"]["Row"];
 type Attachment = Database["public"]["Tables"]["attachments"]["Row"];
-type ActivityRow = Database["public"]["Tables"]["activity_log"]["Row"];
 
 type MemberOption = {
   id: string;
   name: string;
   role: string;
-};
-
-type TaskCommentViewModel = TaskComment & {
-  authorName: string;
 };
 
 type TaskDraft = {
@@ -85,6 +90,7 @@ type TaskDraft = {
 type TaskDetailPanelProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  dependencies?: TaskDependency[];
   workspaceId: string;
   projectId: string;
   task: Task | null;
@@ -97,19 +103,6 @@ type TaskDetailPanelProps = {
   onTaskDuplicated: (task: Task) => void;
   onTaskDeleted: (taskId: string) => void;
 };
-
-function toCommentViewModel(
-  comment: TaskComment,
-  memberNameMap: Record<string, string>,
-  currentUserId: string,
-): TaskCommentViewModel {
-  return {
-    ...comment,
-    authorName:
-      memberNameMap[comment.user_id] ??
-      (comment.user_id === currentUserId ? "You" : `User ${comment.user_id.slice(0, 8)}`),
-  };
-}
 
 function buildDraft(task: Task): TaskDraft {
   return {
@@ -140,9 +133,28 @@ function sanitizeFileName(fileName: string): string {
   return fileName.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-");
 }
 
+function areTaskDraftsEqual(left: TaskDraft | null, right: TaskDraft | null): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+
+  return (
+    left.title === right.title &&
+    left.description === right.description &&
+    left.status === right.status &&
+    left.priority === right.priority &&
+    left.assigneeId === right.assigneeId &&
+    left.dueDate === right.dueDate &&
+    left.isBlocked === right.isBlocked &&
+    left.blockedReason === right.blockedReason &&
+    left.milestoneId === right.milestoneId
+  );
+}
+
 export function TaskDetailPanel({
   open,
   onOpenChange,
+  dependencies = [],
   workspaceId,
   projectId,
   task,
@@ -157,197 +169,146 @@ export function TaskDetailPanel({
 }: TaskDetailPanelProps) {
   const supabase = useMemo(() => createClient(), []);
   const [draft, setDraft] = useState<TaskDraft | null>(task ? buildDraft(task) : null);
-  const [comments, setComments] = useState<TaskCommentViewModel[]>([]);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [activityItems, setActivityItems] = useState<ActivityRow[]>([]);
   const [newComment, setNewComment] = useState("");
-  const [isLoadingThread, setIsLoadingThread] = useState(false);
+  const [hasRemoteTaskUpdate, setHasRemoteTaskUpdate] = useState(false);
   const [isSaving, startSaving] = useTransition();
   const [isPostingComment, startPostingComment] = useTransition();
   const [isUploadingAttachment, startUploadingAttachment] = useTransition();
   const [isDuplicating, startDuplicating] = useTransition();
   const [isDeleting, startDeleting] = useTransition();
+  const [isUpdatingDependencies, setIsUpdatingDependencies] = useState(false);
+  const [dependencyTaskId, setDependencyTaskId] = useState<string>("none");
+  const draftRef = useRef<TaskDraft | null>(draft);
+  const lastSyncedTaskDraftRef = useRef<TaskDraft | null>(task ? buildDraft(task) : null);
+  const lastTaskIdRef = useRef<string | null>(task?.id ?? null);
+  const localDeleteTaskIdRef = useRef<string | null>(null);
 
   const memberNameMap = useMemo(
     () => Object.fromEntries(members.map((member) => [member.id, member.name])),
     [members],
   );
   const currentUserLabel = memberNameMap[currentUserId] ?? "A teammate";
+  const { blockedByMap, blockingMap } = useMemo(() => buildTaskDependencyMaps(dependencies), [dependencies]);
+  const blockedByDependencies = useMemo(
+    () => (task ? dependencies.filter((dependency) => dependency.blocked_task_id === task.id) : []),
+    [dependencies, task],
+  );
+  const availableBlockingTasks = useMemo(
+    () =>
+      tasks.filter(
+        (candidate) =>
+          candidate.id !== task?.id &&
+          !blockedByDependencies.some((dependency) => dependency.blocking_task_id === candidate.id),
+      ),
+    [blockedByDependencies, task?.id, tasks],
+  );
+  const dueState = getTaskDueState({ due_date: draft?.dueDate ?? null, status: draft?.status ?? task?.status ?? "todo" });
 
-  useEffect(() => {
-    setDraft(task ? buildDraft(task) : null);
-  }, [task]);
+  const handleThreadError = useCallback((message: string) => {
+    toast.error(message);
+  }, []);
 
-  useEffect(() => {
-    if (!open || !task) {
-      setComments([]);
-      setAttachments([]);
-      setActivityItems([]);
-      return;
-    }
+  const handleRemoteTaskChange = useCallback(
+    (nextTask: Task) => {
+      const currentDraft = draftRef.current;
+      const previousSyncedDraft = lastSyncedTaskDraftRef.current;
+      const nextDraft = buildDraft(nextTask);
+      const hasLocalEdits = Boolean(
+        currentDraft && previousSyncedDraft && !areTaskDraftsEqual(currentDraft, previousSyncedDraft),
+      );
 
-    let isActive = true;
-    setIsLoadingThread(true);
+      if (hasLocalEdits && currentDraft && !areTaskDraftsEqual(currentDraft, nextDraft)) {
+        setHasRemoteTaskUpdate((current) => {
+          if (!current) {
+            toast.info(
+              "This task changed in another session. Save or reopen the task to refresh the latest fields.",
+              { id: "task-remote-update" },
+            );
+          }
 
-    void Promise.all([
-      supabase
-        .from("task_comments")
-        .select("*")
-        .eq("task_id", task.id)
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("attachments")
-        .select("*")
-        .eq("task_id", task.id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("activity_log")
-        .select("*")
-        .eq("workspace_id", workspaceId)
-        .eq("project_id", projectId)
-        .contains("metadata", { taskId: task.id })
-        .order("created_at", { ascending: false })
-        .limit(8),
-    ]).then(([commentsResult, attachmentsResult, activityResult]) => {
-      if (!isActive) {
+          return true;
+        });
+      }
+
+      onTaskUpdated(nextTask);
+    },
+    [onTaskUpdated],
+  );
+
+  const handleRemoteTaskDelete = useCallback(
+    (taskId: string) => {
+      if (localDeleteTaskIdRef.current === taskId) {
+        localDeleteTaskIdRef.current = null;
         return;
       }
 
-      if (commentsResult.error) {
-        toast.error(commentsResult.error.message);
+      if (task?.id !== taskId) {
+        return;
       }
 
-      if (attachmentsResult.error) {
-        toast.error(attachmentsResult.error.message);
-      }
+      toast.info(`${task.identifier} was deleted in another session.`);
+      onTaskDeleted(taskId);
+      onOpenChange(false);
+    },
+    [onOpenChange, onTaskDeleted, task],
+  );
 
-      if (activityResult.error) {
-        toast.error(activityResult.error.message);
-      }
-
-      setComments(
-        (commentsResult.data ?? []).map((comment) =>
-          toCommentViewModel(comment as TaskComment, memberNameMap, currentUserId),
-        ),
-      );
-      setAttachments((attachmentsResult.data ?? []) as Attachment[]);
-      setActivityItems((activityResult.data ?? []) as ActivityRow[]);
-      setIsLoadingThread(false);
-    });
-
-    return () => {
-      isActive = false;
-    };
-  }, [currentUserId, memberNameMap, open, projectId, supabase, task, workspaceId]);
+  const {
+    comments,
+    attachments,
+    activityItems,
+    isLoading: isLoadingThread,
+    connected: isThreadConnected,
+  } = useTaskThread({
+    open,
+    workspaceId,
+    projectId,
+    task,
+    currentUserId,
+    memberNameMap,
+    supabase,
+    onError: handleThreadError,
+    onRemoteTaskChange: handleRemoteTaskChange,
+    onRemoteTaskDelete: handleRemoteTaskDelete,
+  });
 
   useEffect(() => {
-    if (!open || !task) {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
+    if (!task) {
+      setDraft(null);
+      draftRef.current = null;
+      lastSyncedTaskDraftRef.current = null;
+      lastTaskIdRef.current = null;
+      localDeleteTaskIdRef.current = null;
+      setHasRemoteTaskUpdate(false);
       return;
     }
 
-    const commentsChannel = supabase
-      .channel(`task-comments:${task.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "task_comments",
-          filter: `task_id=eq.${task.id}`,
-        },
-        (payload) => {
-          setComments((current) => {
-            if (payload.eventType === "DELETE") {
-              const removed = payload.old as TaskComment;
-              return current.filter((comment) => comment.id !== removed.id);
-            }
+    setDependencyTaskId("none");
 
-            if (payload.eventType === "INSERT") {
-              const inserted = toCommentViewModel(payload.new as TaskComment, memberNameMap, currentUserId);
+    const nextDraft = buildDraft(task);
+    const previousSyncedDraft = lastSyncedTaskDraftRef.current;
+    const isTaskChanged = task.id !== lastTaskIdRef.current;
+    const currentDraft = draftRef.current;
 
-              if (current.some((comment) => comment.id === inserted.id)) {
-                return current;
-              }
+    if (
+      isTaskChanged ||
+      !currentDraft ||
+      !previousSyncedDraft ||
+      areTaskDraftsEqual(currentDraft, previousSyncedDraft) ||
+      areTaskDraftsEqual(currentDraft, nextDraft)
+    ) {
+      setDraft(nextDraft);
+      draftRef.current = nextDraft;
+      setHasRemoteTaskUpdate(false);
+    }
 
-              return [...current, inserted];
-            }
-
-            const updated = toCommentViewModel(payload.new as TaskComment, memberNameMap, currentUserId);
-            return current.map((comment) => (comment.id === updated.id ? updated : comment));
-          });
-        },
-      )
-      .subscribe();
-
-    const attachmentsChannel = supabase
-      .channel(`task-attachments:${task.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "attachments",
-          filter: `task_id=eq.${task.id}`,
-        },
-        (payload) => {
-          setAttachments((current) => {
-            if (payload.eventType === "DELETE") {
-              const removed = payload.old as Attachment;
-              return current.filter((attachment) => attachment.id !== removed.id);
-            }
-
-            if (payload.eventType === "INSERT") {
-              const inserted = payload.new as Attachment;
-
-              if (current.some((attachment) => attachment.id === inserted.id)) {
-                return current;
-              }
-
-              return [inserted, ...current];
-            }
-
-            const updated = payload.new as Attachment;
-            return current.map((attachment) => (attachment.id === updated.id ? updated : attachment));
-          });
-        },
-      )
-      .subscribe();
-
-    const activityChannel = supabase
-      .channel(`task-activity:${task.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "activity_log",
-          filter: `workspace_id=eq.${workspaceId}`,
-        },
-        (payload) => {
-          const inserted = payload.new as ActivityRow;
-          const metadata = inserted.metadata as Record<string, unknown> | null;
-
-          if (inserted.project_id !== projectId || metadata?.taskId !== task.id) {
-            return;
-          }
-
-          setActivityItems((current) => {
-            if (current.some((item) => item.id === inserted.id)) {
-              return current;
-            }
-
-            return [inserted, ...current].slice(0, 8);
-          });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(commentsChannel);
-      void supabase.removeChannel(attachmentsChannel);
-      void supabase.removeChannel(activityChannel);
-    };
-  }, [currentUserId, memberNameMap, open, projectId, supabase, task, workspaceId]);
+    lastTaskIdRef.current = task.id;
+    lastSyncedTaskDraftRef.current = nextDraft;
+  }, [task]);
 
   if (!task || !draft) {
     return null;
@@ -380,7 +341,7 @@ export function TaskDetailPanel({
         priority: draft.priority,
         assignee_id: draft.assigneeId === "unassigned" ? null : draft.assigneeId,
         due_date: draft.dueDate || null,
-        is_blocked: draft.isBlocked,
+        is_blocked: draft.isBlocked || blockedByDependencies.length > 0,
         blocked_reason: draft.isBlocked ? draft.blockedReason.trim() || null : null,
         milestone_id: draft.milestoneId === "none" ? null : draft.milestoneId,
         position: nextPosition,
@@ -545,10 +506,6 @@ export function TaskDetailPanel({
         return;
       }
 
-      setComments((current) => [
-        ...current,
-        toCommentViewModel(data as TaskComment, memberNameMap, currentUserId),
-      ]);
       setNewComment("");
 
       await insertActivity(supabase, {
@@ -637,8 +594,6 @@ export function TaskDetailPanel({
         toast.error(error?.message ?? "Could not attach file.");
         return;
       }
-
-      setAttachments((current) => [data as Attachment, ...current]);
 
       await insertActivity(supabase, {
         workspaceId,
@@ -746,6 +701,8 @@ export function TaskDetailPanel({
     }
 
     startDeleting(async () => {
+      localDeleteTaskIdRef.current = task.id;
+
       if (attachments.length > 0) {
         await supabase.storage
           .from(TASK_ATTACHMENTS_BUCKET)
@@ -777,6 +734,56 @@ export function TaskDetailPanel({
     });
   };
 
+  const addDependency = () => {
+    if (readOnly || !task || dependencyTaskId === "none") {
+      return;
+    }
+
+    setIsUpdatingDependencies(true);
+    startTransition(async () => {
+      const result = await addTaskDependencyAction({
+        workspaceId,
+        projectId,
+        blockedTaskId: task.id,
+        blockingTaskId: dependencyTaskId,
+      });
+
+      setIsUpdatingDependencies(false);
+
+      if (result.status === "error") {
+        toast.error(result.message);
+        return;
+      }
+
+      setDependencyTaskId("none");
+      toast.success(result.message);
+    });
+  };
+
+  const removeDependency = (dependencyId: string) => {
+    if (readOnly) {
+      return;
+    }
+
+    setIsUpdatingDependencies(true);
+    startTransition(async () => {
+      const result = await removeTaskDependencyAction({
+        workspaceId,
+        projectId,
+        dependencyId,
+      });
+
+      setIsUpdatingDependencies(false);
+
+      if (result.status === "error") {
+        toast.error(result.message);
+        return;
+      }
+
+      toast.success(result.message);
+    });
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -791,6 +798,7 @@ export function TaskDetailPanel({
                 <Badge variant="ghost">{BOARD_COLUMNS.find((column) => column.status === draft.status)?.label ?? draft.status}</Badge>
                 {draft.isBlocked ? <Badge variant="destructive">Blocked</Badge> : null}
                 {readOnly ? <Badge variant="secondary">Archived</Badge> : null}
+                <Badge variant="outline">{isThreadConnected ? "Live" : "Connecting..."}</Badge>
               </div>
               <DialogTitle className="text-lg">Task details</DialogTitle>
               <DialogDescription>
@@ -813,6 +821,14 @@ export function TaskDetailPanel({
                 <Alert>
                   <AlertDescription>
                     Archived projects are read-only. Restore the project from the overview screen to edit this task.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+
+              {hasRemoteTaskUpdate ? (
+                <Alert>
+                  <AlertDescription>
+                    A teammate changed this task while you had local edits open. Save your version or close and reopen the task to reload the latest saved fields.
                   </AlertDescription>
                 </Alert>
               ) : null}
@@ -967,6 +983,60 @@ export function TaskDetailPanel({
                     />
                   </div>
                 ) : null}
+
+                <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                    <Link2 className="size-4 text-slate-500" />
+                    Dependencies
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Blocked by</p>
+                    {blockedByDependencies.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No task dependencies yet.</p>
+                    ) : (
+                      blockedByDependencies.map((dependency) => {
+                        const blockingTask = tasks.find((candidate) => candidate.id === dependency.blocking_task_id);
+
+                        return (
+                          <div key={dependency.id} className="flex items-center justify-between gap-3 rounded-lg border bg-white px-3 py-2 text-sm">
+                            <div>
+                              <p className="font-medium text-slate-900">{blockingTask?.identifier ?? "Task"}</p>
+                              <p className="text-xs text-muted-foreground">{blockingTask?.title ?? "Dependency task"}</p>
+                            </div>
+                            <Button type="button" variant="outline" size="sm" onClick={() => removeDependency(dependency.id)} disabled={readOnly || isUpdatingDependencies}>
+                              Remove
+                            </Button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Add blocking task</Label>
+                    <div className="flex flex-wrap gap-2">
+                      <Select value={dependencyTaskId} onValueChange={(value) => setDependencyTaskId(value ?? "none")} disabled={readOnly || isUpdatingDependencies}>
+                        <SelectTrigger className="w-full sm:w-[320px]">
+                          <SelectValue placeholder="Choose a task" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Choose a task</SelectItem>
+                          {availableBlockingTasks.map((candidate) => (
+                            <SelectItem key={candidate.id} value={candidate.id}>
+                              {candidate.identifier} · {candidate.title}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      <Button type="button" variant="outline" onClick={addDependency} disabled={readOnly || isUpdatingDependencies || dependencyTaskId === "none"}>
+                        {isUpdatingDependencies ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                        Add dependency
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </section>
 
               <section className="space-y-4 rounded-xl border bg-white p-4">
@@ -1055,6 +1125,20 @@ export function TaskDetailPanel({
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Created</span>
                     <span className="font-medium text-slate-900">{toRelativeTime(task.created_at)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Due state</span>
+                    <span className={cn("font-medium", dueState === "overdue" ? "text-red-700" : dueState === "due-soon" ? "text-amber-700" : "text-slate-900")}>
+                      {dueState === "overdue" ? "Overdue" : dueState === "due-soon" ? "Due soon" : "On track"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Blocked by</span>
+                    <span className="font-medium text-slate-900">{blockedByMap[task.id]?.length ?? 0}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Blocking</span>
+                    <span className="font-medium text-slate-900">{blockingMap[task.id]?.length ?? 0}</span>
                   </div>
                 </div>
               </section>

@@ -23,7 +23,7 @@ import { getUserWorkspaceRoute } from "@/lib/workspace";
 import { LandingHover, LandingReveal } from "./landing-motion";
 
 export const metadata: Metadata = {
-  title: "Vince | Focused team workspace for small teams",
+  title: "Vince",
   description:
     "Vince brings project boards, shared notes, team chat, and activity into one focused workspace for small freelance and student teams.",
 };

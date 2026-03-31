@@ -1,4 +1,3 @@
-import Image from "next/image";
 import type { ReactNode } from "react";
 
 type AuthShellProps = {
@@ -44,26 +43,13 @@ export function AuthShell({
               <span className="size-3 rounded-full border border-black/8 bg-[#febc2e] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]" />
               <span className="size-3 rounded-full border border-black/8 bg-[#28c840] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]" />
             </div>
-            <span className="hidden sm:inline">Vince Secure Access</span>
-            <span className="sm:hidden">Vince</span>
+            <span>Secure access</span>
           </div>
 
           <div className="grid lg:grid-cols-[1.06fr_0.94fr]">
             <section className="relative overflow-hidden border-b border-black/18 bg-[radial-gradient(circle_at_68%_18%,_rgba(96,165,250,0.09),_transparent_16%),linear-gradient(180deg,#232833,#1c202a)] px-8 py-9 text-white lg:border-b-0 lg:border-r lg:border-r-black/16 sm:px-9 sm:py-10 lg:px-10 lg:py-11">
             <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0))]" />
             <div className="relative flex h-full flex-col gap-8">
-              <div className="flex items-center gap-3">
-                <Image
-                  src="/vince_logo.png"
-                  alt="Vince"
-                  width={30}
-                  height={30}
-                  className="h-[30px] w-[30px] object-contain"
-                  priority
-                />
-                <span className="text-lg font-semibold tracking-tight text-white/95">Vince</span>
-              </div>
-
               <div className="space-y-5">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/42">{eyebrow}</p>
                 <div className="space-y-4">

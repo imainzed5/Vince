@@ -132,17 +132,7 @@ export default async function HomePage() {
 
       <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-[#f7f8fb]/80 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <div className="flex items-center gap-2.5">
-            <Image
-              src="/vince_logo.png"
-              alt="Vince"
-              width={28}
-              height={28}
-              className="h-7 w-7 object-contain"
-              priority
-            />
-            <span className="text-lg font-semibold tracking-tight">Vince</span>
-          </div>
+          <div className="text-sm font-medium tracking-[0.18em] text-slate-500 uppercase">Focused collaboration</div>
 
           <div className="hidden items-center gap-6 text-sm font-medium text-slate-500 md:flex">
             <a className="transition-colors hover:text-slate-900" href="#product">
@@ -718,16 +708,7 @@ export default async function HomePage() {
 
       <footer className="border-t border-slate-800 bg-slate-950 px-6 py-12 text-sm text-slate-400">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 md:flex-row">
-          <div className="flex items-center gap-2">
-            <Image
-              src="/vince_logo.png"
-              alt="Vince"
-              width={18}
-              height={18}
-              className="h-[18px] w-[18px] object-contain"
-            />
-            <span className="font-semibold text-slate-300">Vince</span>
-          </div>
+          <div className="text-center md:text-left">Boards, notes, chat, and activity in one place.</div>
           <div className="text-center md:text-right">
             {new Date().getFullYear()} Vince Workspace. Focused collaboration for small teams.
           </div>

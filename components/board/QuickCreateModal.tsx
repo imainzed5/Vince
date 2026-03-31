@@ -22,13 +22,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createClient } from "@/lib/supabase/client";
-import { BOARD_COLUMNS } from "@/components/board/config";
 import { insertActivity } from "@/lib/supabase/activity";
+import { getTaskStatusColumns, withTaskStatusFallbacks } from "@/lib/task-statuses";
 import type { Database } from "@/types/database.types";
-import type { Task, TaskPriority, TaskStatus } from "@/types";
+import type { Task, TaskPriority, TaskStatus, WorkspaceTaskStatusDefinition } from "@/types";
 
 type Assignee = {
-  user_id: string;
+  id: string;
+  name: string;
 };
 
 type ProjectPrefixRecord = {
@@ -41,6 +42,8 @@ type QuickCreateModalProps = {
   workspaceId: string;
   projectId: string;
   projectPrefix: string;
+  assignees: Assignee[];
+  taskStatuses?: WorkspaceTaskStatusDefinition[];
   readOnly?: boolean;
   defaultStatus: TaskStatus;
   onOptimisticCreate: (task: Task) => void;
@@ -57,6 +60,8 @@ export function QuickCreateModal({
   workspaceId,
   projectId,
   projectPrefix,
+  assignees,
+  taskStatuses = [],
   readOnly = false,
   defaultStatus,
   onOptimisticCreate,
@@ -65,12 +70,15 @@ export function QuickCreateModal({
   onError,
 }: QuickCreateModalProps) {
   const supabase = useMemo(() => createClient(), []);
+  const statusColumns = useMemo(
+    () => getTaskStatusColumns(withTaskStatusFallbacks(taskStatuses, [defaultStatus])),
+    [defaultStatus, taskStatuses],
+  );
 
   const [title, setTitle] = useState("");
   const [status, setStatus] = useState<TaskStatus>(defaultStatus);
   const [priority, setPriority] = useState<TaskPriority>("none");
   const [assigneeId, setAssigneeId] = useState<string>("unassigned");
-  const [assignees, setAssignees] = useState<Assignee[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
@@ -81,34 +89,6 @@ export function QuickCreateModal({
 
     setStatus(defaultStatus);
   }, [defaultStatus, open]);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    let alive = true;
-
-    const loadMembers = async () => {
-      const { data } = await supabase
-        .from("workspace_members")
-        .select("user_id")
-        .eq("workspace_id", workspaceId)
-        .order("joined_at", { ascending: true });
-
-      if (!alive) {
-        return;
-      }
-
-      setAssignees((data ?? []) as Assignee[]);
-    };
-
-    void loadMembers();
-
-    return () => {
-      alive = false;
-    };
-  }, [open, supabase, workspaceId]);
 
   const reset = () => {
     setTitle("");
@@ -182,6 +162,7 @@ export function QuickCreateModal({
         project_id: projectId,
         identifier,
         title: title.trim(),
+        custom_fields: {},
         description: null,
         status,
         priority,
@@ -204,6 +185,7 @@ export function QuickCreateModal({
         project_id: projectId,
         identifier,
         title: optimisticTask.title,
+        custom_fields: {},
         status,
         priority,
         assignee_id: assigneeId === "unassigned" ? null : assigneeId,
@@ -292,10 +274,10 @@ export function QuickCreateModal({
               <Label>Status</Label>
               <Select value={status} onValueChange={(value) => setStatus(value as TaskStatus)} disabled={readOnly}>
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  <SelectValue>{statusColumns.find((column) => column.status === status)?.label ?? "Status"}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {BOARD_COLUMNS.map((column) => (
+                  {statusColumns.map((column) => (
                     <SelectItem key={column.status} value={column.status}>
                       {column.label}
                     </SelectItem>
@@ -324,13 +306,17 @@ export function QuickCreateModal({
               <Label>Assignee</Label>
               <Select value={assigneeId} onValueChange={(value) => setAssigneeId(value ?? "unassigned")} disabled={readOnly}>
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  <SelectValue>
+                    {assigneeId === "unassigned"
+                      ? "Unassigned"
+                      : assignees.find((member) => member.id === assigneeId)?.name ?? "Unknown member"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="unassigned">Unassigned</SelectItem>
                   {assignees.map((member) => (
-                    <SelectItem key={member.user_id} value={member.user_id}>
-                      {member.user_id.slice(0, 8)}
+                    <SelectItem key={member.id} value={member.id}>
+                      {member.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

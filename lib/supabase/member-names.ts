@@ -1,6 +1,7 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
-import { getDisplayNameFromEmail } from "@/lib/utils/displayName";
+import { resolveUserDisplayName } from "@/lib/supabase/user-profiles";
+import { getDisplayNameFromEmail, getMemberDisplayName } from "@/lib/utils/displayName";
 import type { Database } from "@/types/database.types";
 
 export async function getWorkspaceMemberNames(
@@ -37,6 +38,13 @@ export async function getWorkspaceMemberNames(
 
   const userIds = Array.from(new Set((members ?? []).map((member) => member.user_id)));
 
+  const { data: profiles } = await adminClient
+    .from("user_profiles")
+    .select("user_id, display_name")
+    .in("user_id", userIds);
+
+  const profileMap = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]));
+
   await Promise.all(
     userIds.map(async (userId) => {
       if (memberNames[userId]) {
@@ -46,7 +54,8 @@ export async function getWorkspaceMemberNames(
       const { data } = await adminClient.auth.admin.getUserById(userId);
       const email = data.user?.email;
 
-      memberNames[userId] = email ? getDisplayNameFromEmail(email) : `User ${userId.slice(0, 8)}`;
+      memberNames[userId] = resolveUserDisplayName(profileMap.get(userId) ?? null, email)
+        || (email ? getDisplayNameFromEmail(email) : getMemberDisplayName(null));
     }),
   );
 

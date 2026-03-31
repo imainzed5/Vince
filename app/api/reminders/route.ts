@@ -1,6 +1,7 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
+import { isDoneTaskStatus } from "@/lib/task-statuses";
 import type { Database, Json } from "@/types/database.types";
 
 type TaskRow = Database["public"]["Tables"]["tasks"]["Row"];
@@ -38,8 +39,7 @@ export async function POST(request: Request) {
   const { data: tasks, error: tasksError } = await supabase
     .from("tasks")
     .select("*")
-    .not("assignee_id", "is", null)
-    .neq("status", "done");
+    .not("assignee_id", "is", null);
 
   if (tasksError) {
     return NextResponse.json({ error: tasksError.message }, { status: 500 });
@@ -56,6 +56,26 @@ export async function POST(request: Request) {
   }
 
   const workspaceByProjectId = Object.fromEntries((projects ?? []).map((project) => [project.id, project.workspace_id]));
+  const workspaceIds = Array.from(new Set((projects ?? []).map((project) => project.workspace_id)));
+  const { data: taskStatuses, error: taskStatusesError } = workspaceIds.length
+    ? await supabase
+        .from("workspace_task_statuses")
+        .select("*")
+        .in("workspace_id", workspaceIds)
+        .order("position", { ascending: true })
+    : { data: [], error: null };
+
+  if (taskStatusesError) {
+    return NextResponse.json({ error: taskStatusesError.message }, { status: 500 });
+  }
+
+  const taskStatusesByWorkspace = ((taskStatuses ?? []) as Database["public"]["Tables"]["workspace_task_statuses"]["Row"][]).reduce<
+    Record<string, Database["public"]["Tables"]["workspace_task_statuses"]["Row"][]>
+  >((accumulator, status) => {
+    accumulator[status.workspace_id] ??= [];
+    accumulator[status.workspace_id].push(status);
+    return accumulator;
+  }, {});
   const notificationsToInsert: Database["public"]["Tables"]["notifications"]["Insert"][] = [];
   const reminderKeys = new Set<string>();
 
@@ -67,6 +87,10 @@ export async function POST(request: Request) {
     const workspaceId = workspaceByProjectId[task.project_id];
 
     if (!workspaceId) {
+      continue;
+    }
+
+    if (isDoneTaskStatus(task.status, taskStatusesByWorkspace[workspaceId] ?? [])) {
       continue;
     }
 

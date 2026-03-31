@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { ActivityFeed } from "@/components/activity/ActivityFeed";
+import { getWorkspaceMemberNames } from "@/lib/supabase/member-names";
 import { createClient } from "@/lib/supabase/server";
 
 type ProjectActivityPageProps = {
@@ -21,5 +22,10 @@ export default async function ProjectActivityPage({ params }: ProjectActivityPag
     redirect("/login");
   }
 
-  return <ActivityFeed workspaceId={workspaceId} projectId={projectId} />;
+  const memberNames = await getWorkspaceMemberNames(workspaceId, {
+    id: user.id,
+    email: user.email ?? null,
+  });
+
+  return <ActivityFeed workspaceId={workspaceId} projectId={projectId} memberNames={memberNames} />;
 }

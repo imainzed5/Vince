@@ -58,6 +58,29 @@ export async function signupAction(formData: FormData) {
   return redirect(destination.path);
 }
 
+export async function forgotPasswordAction(formData: FormData) {
+  const email = String(formData.get("email") ?? "").trim();
+
+  if (!email) {
+    return redirect(`/forgot-password?error=${encodeMessage("Email is required.")}`);
+  }
+
+  const requestHeaders = await headers();
+  const origin = requestHeaders.get("origin") ?? process.env.NEXT_PUBLIC_APP_URL;
+  const supabase = await createClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: origin ? `${origin}/reset-password` : undefined,
+  });
+
+  if (error) {
+    return redirect(`/forgot-password?error=${encodeMessage(error.message)}`);
+  }
+
+  return redirect(
+    `/forgot-password?message=${encodeMessage("Password reset sent. Check your email for the recovery link.")}`,
+  );
+}
+
 export async function logoutAction() {
   const supabase = await createClient();
   await supabase.auth.signOut();

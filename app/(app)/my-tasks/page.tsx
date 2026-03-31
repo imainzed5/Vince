@@ -3,8 +3,9 @@ import { redirect } from "next/navigation";
 import { MyTasksView } from "@/components/tasks/MyTasksView";
 import { getWorkspaceMemberNames } from "@/lib/supabase/member-names";
 import { createClient } from "@/lib/supabase/server";
+import { getMemberDisplayName } from "@/lib/utils/displayName";
 import { getUserWorkspaceRoute } from "@/lib/workspace";
-import type { Project, Task, TaskDependency, Workspace } from "@/types";
+import type { Project, Task, TaskCustomFieldDefinition, TaskDependency, Workspace, WorkspaceTaskStatusDefinition } from "@/types";
 import type { Database } from "@/types/database.types";
 
 type Milestone = Database["public"]["Tables"]["milestones"]["Row"];
@@ -53,7 +54,7 @@ export default async function MyTasksPage({ searchParams }: MyTasksPageProps) {
 
   const projectIds = (projects ?? []).map((project) => project.id);
 
-  const [{ data: tasks }, { data: milestones }, { data: taskDependencies }, memberNamePairs] = await Promise.all([
+  const [{ data: tasks }, { data: milestones }, { data: taskDependencies }, { data: taskFieldDefinitions }, { data: taskStatusDefinitions }, memberNamePairs] = await Promise.all([
     projectIds.length
       ? supabase.from("tasks").select("*").in("project_id", projectIds).order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as Database["public"]["Tables"]["tasks"]["Row"][] }),
@@ -63,6 +64,20 @@ export default async function MyTasksPage({ searchParams }: MyTasksPageProps) {
     projectIds.length
       ? supabase.from("task_dependencies").select("*").in("project_id", projectIds).order("created_at", { ascending: true })
       : Promise.resolve({ data: [] as Database["public"]["Tables"]["task_dependencies"]["Row"][] }),
+    workspaceIds.length
+      ? supabase
+          .from("workspace_task_fields")
+          .select("*")
+          .in("workspace_id", workspaceIds)
+          .order("position", { ascending: true })
+      : Promise.resolve({ data: [] as TaskCustomFieldDefinition[] }),
+    workspaceIds.length
+      ? supabase
+          .from("workspace_task_statuses")
+          .select("*")
+          .in("workspace_id", workspaceIds)
+          .order("position", { ascending: true })
+      : Promise.resolve({ data: [] as WorkspaceTaskStatusDefinition[] }),
     Promise.all(
       workspaceIds.map(async (workspaceId) => [
         workspaceId,
@@ -75,9 +90,16 @@ export default async function MyTasksPage({ searchParams }: MyTasksPageProps) {
   ]);
 
   const memberNamesByWorkspace = Object.fromEntries(memberNamePairs);
+  const customFieldDefinitionsByWorkspace = ((taskFieldDefinitions ?? []) as TaskCustomFieldDefinition[]).reduce<
+    Record<string, TaskCustomFieldDefinition[]>
+  >((accumulator, field) => {
+    accumulator[field.workspace_id] ??= [];
+    accumulator[field.workspace_id].push(field);
+    return accumulator;
+  }, {});
   const membersByWorkspace = ((allMembers ?? []) as WorkspaceMember[]).reduce<Record<string, Array<{ id: string; name: string; role: string }>>>(
     (accumulator, member) => {
-      const displayName = memberNamesByWorkspace[member.workspace_id]?.[member.user_id] ?? `User ${member.user_id.slice(0, 8)}`;
+      const displayName = getMemberDisplayName(memberNamesByWorkspace[member.workspace_id]?.[member.user_id]);
 
       accumulator[member.workspace_id] ??= [];
       accumulator[member.workspace_id].push({
@@ -90,6 +112,13 @@ export default async function MyTasksPage({ searchParams }: MyTasksPageProps) {
     },
     {},
   );
+  const taskStatusesByWorkspace = ((taskStatusDefinitions ?? []) as WorkspaceTaskStatusDefinition[]).reduce<
+    Record<string, WorkspaceTaskStatusDefinition[]>
+  >((accumulator, status) => {
+    accumulator[status.workspace_id] ??= [];
+    accumulator[status.workspace_id].push(status);
+    return accumulator;
+  }, {});
 
   const defaultWorkspaceId =
     typeof resolvedSearchParams?.workspaceId === "string" && workspaceIds.includes(resolvedSearchParams.workspaceId)
@@ -106,6 +135,8 @@ export default async function MyTasksPage({ searchParams }: MyTasksPageProps) {
       projects={(projects ?? []) as Project[]}
       milestones={(milestones ?? []) as Milestone[]}
       membersByWorkspace={membersByWorkspace}
+      customFieldDefinitionsByWorkspace={customFieldDefinitionsByWorkspace}
+      taskStatusesByWorkspace={taskStatusesByWorkspace}
     />
   );
 }

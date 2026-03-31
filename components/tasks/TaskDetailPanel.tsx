@@ -19,6 +19,7 @@ import {
   LoaderCircle,
   MessageSquareText,
   Paperclip,
+  Pencil,
   Plus,
   Save,
   ShieldAlert,
@@ -32,7 +33,7 @@ import {
 } from "@/app/(app)/workspace/[workspaceId]/project/[projectId]/actions";
 import { ActivityItem } from "@/components/activity/ActivityItem";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { BOARD_COLUMNS, PRIORITY_CONFIG } from "@/components/board/config";
+import { PRIORITY_CONFIG } from "@/components/board/config";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,10 +58,20 @@ import { useTaskThread } from "@/hooks/useTaskThread";
 import { extractMentionedUserIds, insertNotifications } from "@/lib/collaboration";
 import { insertActivity } from "@/lib/supabase/activity";
 import { createClient } from "@/lib/supabase/client";
+import {
+  areTaskCustomFieldValuesEqual,
+  getTaskCustomFieldTypeLabel,
+  parseTaskCustomFieldOptions,
+  parseTaskCustomFieldValues,
+  serializeTaskCustomFieldValues,
+  type TaskCustomFieldValues,
+} from "@/lib/task-custom-fields";
+import { getTaskStatusLabel, withTaskStatusFallbacks } from "@/lib/task-statuses";
 import { buildTaskDependencyMaps, getTaskDueState } from "@/lib/task-insights";
+import { getMemberDisplayName } from "@/lib/utils/displayName";
 import { cn } from "@/lib/utils";
 import { toRelativeTime } from "@/lib/utils/time";
-import type { Task, TaskDependency, TaskPriority, TaskStatus } from "@/types";
+import type { Task, TaskCustomFieldDefinition, TaskDependency, TaskPriority, TaskStatus, WorkspaceTaskStatusDefinition } from "@/types";
 import type { Database } from "@/types/database.types";
 
 const TASK_ATTACHMENTS_BUCKET = "task-attachments";
@@ -75,11 +86,14 @@ type MemberOption = {
   role: string;
 };
 
+type TaskComment = Database["public"]["Tables"]["task_comments"]["Row"];
+
 type TaskDraft = {
   title: string;
   description: string;
   status: TaskStatus;
   priority: TaskPriority;
+  customFields: TaskCustomFieldValues;
   assigneeId: string;
   dueDate: string;
   isBlocked: boolean;
@@ -95,6 +109,8 @@ type TaskDetailPanelProps = {
   projectId: string;
   task: Task | null;
   tasks: Task[];
+  taskStatuses?: WorkspaceTaskStatusDefinition[];
+  customFieldDefinitions?: TaskCustomFieldDefinition[];
   milestones?: Milestone[];
   members?: MemberOption[];
   currentUserId: string;
@@ -110,6 +126,7 @@ function buildDraft(task: Task): TaskDraft {
     description: task.description ?? "",
     status: task.status,
     priority: task.priority as TaskPriority,
+    customFields: parseTaskCustomFieldValues(task.custom_fields),
     assigneeId: task.assignee_id ?? "unassigned",
     dueDate: task.due_date ?? "",
     isBlocked: Boolean(task.is_blocked),
@@ -133,6 +150,16 @@ function sanitizeFileName(fileName: string): string {
   return fileName.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-");
 }
 
+function buildCommentPreview(content: string): string {
+  const normalizedContent = content.trim().replace(/\s+/g, " ");
+
+  if (normalizedContent.length <= 140) {
+    return normalizedContent;
+  }
+
+  return `${normalizedContent.slice(0, 137)}...`;
+}
+
 function areTaskDraftsEqual(left: TaskDraft | null, right: TaskDraft | null): boolean {
   if (!left || !right) {
     return left === right;
@@ -143,6 +170,7 @@ function areTaskDraftsEqual(left: TaskDraft | null, right: TaskDraft | null): bo
     left.description === right.description &&
     left.status === right.status &&
     left.priority === right.priority &&
+    areTaskCustomFieldValuesEqual(left.customFields, right.customFields) &&
     left.assigneeId === right.assigneeId &&
     left.dueDate === right.dueDate &&
     left.isBlocked === right.isBlocked &&
@@ -159,6 +187,8 @@ export function TaskDetailPanel({
   projectId,
   task,
   tasks,
+  taskStatuses = [],
+  customFieldDefinitions = [],
   milestones = [],
   members = [],
   currentUserId,
@@ -170,9 +200,16 @@ export function TaskDetailPanel({
   const supabase = useMemo(() => createClient(), []);
   const [draft, setDraft] = useState<TaskDraft | null>(task ? buildDraft(task) : null);
   const [newComment, setNewComment] = useState("");
+  const [newCommentIsDecision, setNewCommentIsDecision] = useState(false);
+  const [commentFilter, setCommentFilter] = useState<"all" | "decisions">("all");
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingCommentContent, setEditingCommentContent] = useState("");
+  const [editingCommentIsDecision, setEditingCommentIsDecision] = useState(false);
+  const [pendingCommentId, setPendingCommentId] = useState<string | null>(null);
   const [hasRemoteTaskUpdate, setHasRemoteTaskUpdate] = useState(false);
   const [isSaving, startSaving] = useTransition();
   const [isPostingComment, startPostingComment] = useTransition();
+  const [isUpdatingComment, startUpdatingComment] = useTransition();
   const [isUploadingAttachment, startUploadingAttachment] = useTransition();
   const [isDuplicating, startDuplicating] = useTransition();
   const [isDeleting, startDeleting] = useTransition();
@@ -202,7 +239,25 @@ export function TaskDetailPanel({
       ),
     [blockedByDependencies, task?.id, tasks],
   );
-  const dueState = getTaskDueState({ due_date: draft?.dueDate ?? null, status: draft?.status ?? task?.status ?? "todo" });
+  const statusOptions = useMemo(
+    () => withTaskStatusFallbacks(taskStatuses, [task?.status ?? "", draft?.status ?? ""].filter(Boolean)),
+    [draft?.status, task?.status, taskStatuses],
+  );
+  const dueState = getTaskDueState(
+    { due_date: draft?.dueDate ?? null, status: draft?.status ?? task?.status ?? "todo" },
+    undefined,
+    statusOptions,
+  );
+  const customFieldSnapshotItems = useMemo(
+    () =>
+      customFieldDefinitions
+        .map((field) => ({
+          field,
+          value: draft?.customFields[field.id]?.trim() ?? "",
+        }))
+        .filter((item) => item.value),
+    [customFieldDefinitions, draft?.customFields],
+  );
 
   const handleThreadError = useCallback((message: string) => {
     toast.error(message);
@@ -272,6 +327,11 @@ export function TaskDetailPanel({
     onRemoteTaskDelete: handleRemoteTaskDelete,
   });
 
+  const visibleComments = useMemo(
+    () => comments.filter((comment) => commentFilter === "all" || Boolean(comment.is_decision)),
+    [commentFilter, comments],
+  );
+
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
@@ -279,6 +339,13 @@ export function TaskDetailPanel({
   useEffect(() => {
     if (!task) {
       setDraft(null);
+      setNewComment("");
+      setNewCommentIsDecision(false);
+      setCommentFilter("all");
+      setEditingCommentId(null);
+      setEditingCommentContent("");
+      setEditingCommentIsDecision(false);
+      setPendingCommentId(null);
       draftRef.current = null;
       lastSyncedTaskDraftRef.current = null;
       lastTaskIdRef.current = null;
@@ -288,6 +355,9 @@ export function TaskDetailPanel({
     }
 
     setDependencyTaskId("none");
+    setEditingCommentId(null);
+    setEditingCommentContent("");
+    setEditingCommentIsDecision(false);
 
     const nextDraft = buildDraft(task);
     const previousSyncedDraft = lastSyncedTaskDraftRef.current;
@@ -318,6 +388,34 @@ export function TaskDetailPanel({
     setDraft((current) => (current ? { ...current, [key]: value } : current));
   };
 
+  const updateCustomFieldValue = (fieldId: string, value: string) => {
+    setDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        customFields: {
+          ...current.customFields,
+          [fieldId]: value,
+        },
+      };
+    });
+  };
+
+  const beginEditingComment = (comment: TaskComment) => {
+    setEditingCommentId(comment.id);
+    setEditingCommentContent(comment.content);
+    setEditingCommentIsDecision(Boolean(comment.is_decision));
+  };
+
+  const cancelEditingComment = () => {
+    setEditingCommentId(null);
+    setEditingCommentContent("");
+    setEditingCommentIsDecision(false);
+  };
+
   const saveTask = () => {
     if (readOnly) {
       return;
@@ -339,6 +437,7 @@ export function TaskDetailPanel({
         description: draft.description.trim() || null,
         status: draft.status,
         priority: draft.priority,
+        custom_fields: serializeTaskCustomFieldValues(draft.customFields, customFieldDefinitions),
         assignee_id: draft.assigneeId === "unassigned" ? null : draft.assigneeId,
         due_date: draft.dueDate || null,
         is_blocked: draft.isBlocked || blockedByDependencies.length > 0,
@@ -455,6 +554,10 @@ export function TaskDetailPanel({
         task.title !== updatedTask.title ||
         task.description !== updatedTask.description ||
         task.priority !== updatedTask.priority ||
+        !areTaskCustomFieldValuesEqual(
+          parseTaskCustomFieldValues(task.custom_fields),
+          parseTaskCustomFieldValues(updatedTask.custom_fields),
+        ) ||
         task.due_date !== updatedTask.due_date ||
         task.milestone_id !== updatedTask.milestone_id ||
         task.assignee_id !== updatedTask.assignee_id ||
@@ -497,6 +600,7 @@ export function TaskDetailPanel({
           task_id: task.id,
           user_id: currentUserId,
           content: newComment.trim(),
+          is_decision: newCommentIsDecision,
         })
         .select("*")
         .single();
@@ -507,6 +611,7 @@ export function TaskDetailPanel({
       }
 
       setNewComment("");
+      setNewCommentIsDecision(false);
 
       await insertActivity(supabase, {
         workspaceId,
@@ -516,6 +621,9 @@ export function TaskDetailPanel({
         metadata: {
           taskId: task.id,
           identifier: task.identifier,
+          commentId: data.id,
+          commentPreview: buildCommentPreview(data.content),
+          isDecision: data.is_decision,
         },
       });
 
@@ -546,9 +654,151 @@ export function TaskDetailPanel({
     });
   };
 
+  const saveCommentEdit = (comment: TaskComment) => {
+    if (readOnly || comment.deleted_at) {
+      return;
+    }
+
+    const nextContent = editingCommentContent.trim();
+
+    if (!nextContent) {
+      toast.error("Comment content is required.");
+      return;
+    }
+
+    if (nextContent === comment.content.trim() && editingCommentIsDecision === Boolean(comment.is_decision)) {
+      cancelEditingComment();
+      return;
+    }
+
+    setPendingCommentId(comment.id);
+
+    startUpdatingComment(async () => {
+      const previousMentionedUserIds = new Set(
+        extractMentionedUserIds(comment.content, memberNameMap).filter((userId) => userId !== currentUserId),
+      );
+
+      const { data: updatedComment, error } = await supabase
+        .from("task_comments")
+        .update({
+          content: nextContent,
+          is_decision: editingCommentIsDecision,
+          edited_at: new Date().toISOString(),
+        })
+        .eq("id", comment.id)
+        .eq("task_id", task.id)
+        .is("deleted_at", null)
+        .select("*")
+        .single();
+
+      setPendingCommentId(null);
+
+      if (error || !updatedComment) {
+        toast.error(error?.message ?? "Could not update comment.");
+        return;
+      }
+
+      await insertActivity(supabase, {
+        workspaceId,
+        projectId,
+        actorId: currentUserId,
+        action: "task.comment_edited",
+        metadata: {
+          taskId: task.id,
+          identifier: task.identifier,
+          commentId: updatedComment.id,
+          commentPreview: buildCommentPreview(updatedComment.content),
+          isDecision: updatedComment.is_decision,
+        },
+      });
+
+      const nextMentionedUserIds = extractMentionedUserIds(updatedComment.content, memberNameMap).filter(
+        (userId) => userId !== currentUserId && !previousMentionedUserIds.has(userId),
+      );
+
+      if (nextMentionedUserIds.length) {
+        await insertNotifications(
+          supabase,
+          nextMentionedUserIds.map((recipientUserId) => ({
+            workspaceId,
+            projectId,
+            recipientUserId,
+            actorId: currentUserId,
+            type: "task.comment_mentioned",
+            title: `${currentUserLabel} mentioned you on ${task.identifier}`,
+            body: updatedComment.content,
+            metadata: {
+              taskId: task.id,
+              identifier: task.identifier,
+              commentId: updatedComment.id,
+            },
+          })),
+        );
+      }
+
+      cancelEditingComment();
+      toast.success("Comment updated.");
+    });
+  };
+
+  const deleteComment = (comment: TaskComment) => {
+    if (readOnly || comment.deleted_at) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      comment.is_decision
+        ? "Delete this decision note? The history entry will remain, but the comment will be marked deleted."
+        : "Delete this comment? The history entry will remain, but the comment will be marked deleted.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setPendingCommentId(comment.id);
+
+    startUpdatingComment(async () => {
+      const { error } = await supabase
+        .from("task_comments")
+        .update({
+          deleted_at: new Date().toISOString(),
+          deleted_by: currentUserId,
+        })
+        .eq("id", comment.id)
+        .eq("task_id", task.id)
+        .is("deleted_at", null);
+
+      setPendingCommentId(null);
+
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+
+      await insertActivity(supabase, {
+        workspaceId,
+        projectId,
+        actorId: currentUserId,
+        action: "task.comment_deleted",
+        metadata: {
+          taskId: task.id,
+          identifier: task.identifier,
+          commentId: comment.id,
+          wasDecision: comment.is_decision,
+        },
+      });
+
+      if (editingCommentId === comment.id) {
+        cancelEditingComment();
+      }
+
+      toast.success(comment.is_decision ? "Decision note deleted." : "Comment deleted.");
+    });
+  };
+
   const uploadAttachment = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
-    event.target.value = "";
 
     if (readOnly) {
       return;
@@ -650,6 +900,7 @@ export function TaskDetailPanel({
           project_id: projectId,
           identifier,
           title: `Copy of ${task.title}`,
+          custom_fields: task.custom_fields,
           description: task.description,
           status: task.status,
           priority: task.priority,
@@ -788,14 +1039,14 @@ export function TaskDetailPanel({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="left-auto right-0 top-0 h-screen max-w-[min(720px,100vw)] translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 rounded-none border-l p-0 sm:max-w-[720px]"
+        className="surface-shell left-auto right-0 top-0 h-screen max-w-[min(720px,100vw)] translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 rounded-none border-l bg-background/95 p-0 backdrop-blur-xl sm:max-w-[720px]"
       >
-        <DialogHeader className="border-b px-6 py-5">
+        <DialogHeader className="surface-shell border-b px-6 py-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <Badge variant="outline">{task.identifier}</Badge>
-                <Badge variant="ghost">{BOARD_COLUMNS.find((column) => column.status === draft.status)?.label ?? draft.status}</Badge>
+                <Badge variant="ghost">{getTaskStatusLabel(draft.status, statusOptions)}</Badge>
                 {draft.isBlocked ? <Badge variant="destructive">Blocked</Badge> : null}
                 {readOnly ? <Badge variant="secondary">Archived</Badge> : null}
                 <Badge variant="outline">{isThreadConnected ? "Live" : "Connecting..."}</Badge>
@@ -833,7 +1084,7 @@ export function TaskDetailPanel({
                 </Alert>
               ) : null}
 
-              <section className="space-y-4 rounded-xl border bg-white p-4">
+              <section className="surface-panel space-y-4 rounded-xl border p-4">
                 <div className="space-y-2">
                   <Label htmlFor="task-detail-title">Title</Label>
                   <Input
@@ -850,7 +1101,7 @@ export function TaskDetailPanel({
                     id="task-detail-description"
                     value={draft.description}
                     onChange={(event) => updateDraft("description", event.target.value)}
-                    className="min-h-[140px] w-full resize-y rounded-lg border border-slate-200 p-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                    className="surface-subpanel min-h-[140px] w-full resize-y rounded-lg border border-border p-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
                     placeholder="Add the working context, acceptance notes, or delivery details."
                     disabled={readOnly}
                   />
@@ -865,12 +1116,12 @@ export function TaskDetailPanel({
                       disabled={readOnly}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue>{getTaskStatusLabel(draft.status, statusOptions) ?? "Status"}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        {BOARD_COLUMNS.map((column) => (
-                          <SelectItem key={column.status} value={column.status}>
-                            {column.label}
+                        {statusOptions.map((statusOption) => (
+                          <SelectItem key={statusOption.key} value={statusOption.key}>
+                            {statusOption.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -885,7 +1136,7 @@ export function TaskDetailPanel({
                       disabled={readOnly}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue>{PRIORITY_CONFIG[draft.priority].label}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {(Object.keys(PRIORITY_CONFIG) as TaskPriority[]).map((priority) => (
@@ -905,7 +1156,9 @@ export function TaskDetailPanel({
                       disabled={readOnly}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue>
+                          {draft.assigneeId === "unassigned" ? "Unassigned" : getMemberDisplayName(memberNameMap[draft.assigneeId])}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="unassigned">Unassigned</SelectItem>
@@ -937,7 +1190,11 @@ export function TaskDetailPanel({
                       disabled={readOnly}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue>
+                          {draft.milestoneId === "none"
+                            ? "No milestone"
+                            : milestones.find((milestone) => milestone.id === draft.milestoneId)?.name ?? "Unknown milestone"}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">No milestone</SelectItem>
@@ -958,7 +1215,7 @@ export function TaskDetailPanel({
                       disabled={readOnly}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue>{draft.isBlocked ? "Blocked" : "Clear"}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="clear">Clear</SelectItem>
@@ -969,29 +1226,84 @@ export function TaskDetailPanel({
                 </div>
 
                 {draft.isBlocked ? (
-                  <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 p-3">
-                    <div className="flex items-center gap-2 text-sm font-medium text-red-700">
+                  <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-500/25 dark:bg-red-500/10">
+                    <div className="flex items-center gap-2 text-sm font-medium text-red-700 dark:text-red-200">
                       <ShieldAlert className="size-4" />
                       Blocker reason
                     </div>
                     <textarea
                       value={draft.blockedReason}
                       onChange={(event) => updateDraft("blockedReason", event.target.value)}
-                      className="min-h-[88px] w-full resize-y rounded-lg border border-red-200 bg-white p-3 text-sm outline-none focus-visible:border-red-300 focus-visible:ring-2 focus-visible:ring-red-200"
+                      className="surface-subpanel min-h-[88px] w-full resize-y rounded-lg border border-red-200 p-3 text-sm outline-none focus-visible:border-red-300 focus-visible:ring-2 focus-visible:ring-red-200 dark:border-red-500/25"
                       placeholder="Describe what is preventing progress."
                       disabled={readOnly}
                     />
                   </div>
                 ) : null}
 
-                <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium text-slate-800">
-                    <Link2 className="size-4 text-slate-500" />
+                {customFieldDefinitions.length > 0 ? (
+                  <div className="surface-subpanel space-y-4 rounded-lg border border-border p-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Custom fields</p>
+                      <p className="text-xs text-muted-foreground">Workspace-defined fields that add project-specific context.</p>
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {customFieldDefinitions.map((field) => {
+                        const value = draft.customFields[field.id] ?? "";
+                        const options = parseTaskCustomFieldOptions(field.options);
+
+                        return (
+                          <div key={field.id} className="space-y-2">
+                            <Label>{field.name}</Label>
+                            {field.field_type === "select" ? (
+                              <Select
+                                value={value || "none"}
+                                onValueChange={(nextValue) =>
+                                  updateCustomFieldValue(field.id, !nextValue || nextValue === "none" ? "" : nextValue)
+                                }
+                                disabled={readOnly}
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue>
+                                    {value || `Choose ${field.name.toLowerCase()}`}
+                                  </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">No value</SelectItem>
+                                  {options.map((option) => (
+                                    <SelectItem key={option} value={option}>
+                                      {option}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <Input
+                                type={field.field_type === "date" ? "date" : field.field_type === "number" ? "number" : "text"}
+                                inputMode={field.field_type === "number" ? "decimal" : undefined}
+                                value={value}
+                                onChange={(event) => updateCustomFieldValue(field.id, event.target.value)}
+                                placeholder={field.field_type === "text" ? `Add ${field.name.toLowerCase()}` : undefined}
+                                disabled={readOnly}
+                              />
+                            )}
+                            <p className="text-xs text-muted-foreground">{getTaskCustomFieldTypeLabel(field.field_type)} field</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="surface-subpanel space-y-3 rounded-lg border border-border p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Link2 className="size-4 text-muted-foreground" />
                     Dependencies
                   </div>
 
                   <div className="space-y-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Blocked by</p>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Blocked by</p>
                     {blockedByDependencies.length === 0 ? (
                       <p className="text-sm text-muted-foreground">No task dependencies yet.</p>
                     ) : (
@@ -999,9 +1311,9 @@ export function TaskDetailPanel({
                         const blockingTask = tasks.find((candidate) => candidate.id === dependency.blocking_task_id);
 
                         return (
-                          <div key={dependency.id} className="flex items-center justify-between gap-3 rounded-lg border bg-white px-3 py-2 text-sm">
+                          <div key={dependency.id} className="surface-panel flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
                             <div>
-                              <p className="font-medium text-slate-900">{blockingTask?.identifier ?? "Task"}</p>
+                              <p className="font-medium text-foreground">{blockingTask?.identifier ?? "Task"}</p>
                               <p className="text-xs text-muted-foreground">{blockingTask?.title ?? "Dependency task"}</p>
                             </div>
                             <Button type="button" variant="outline" size="sm" onClick={() => removeDependency(dependency.id)} disabled={readOnly || isUpdatingDependencies}>
@@ -1018,7 +1330,14 @@ export function TaskDetailPanel({
                     <div className="flex flex-wrap gap-2">
                       <Select value={dependencyTaskId} onValueChange={(value) => setDependencyTaskId(value ?? "none")} disabled={readOnly || isUpdatingDependencies}>
                         <SelectTrigger className="w-full sm:w-[320px]">
-                          <SelectValue placeholder="Choose a task" />
+                          <SelectValue placeholder="Choose a task">
+                            {dependencyTaskId === "none"
+                              ? "Choose a task"
+                              : (() => {
+                                  const selectedTask = availableBlockingTasks.find((candidate) => candidate.id === dependencyTaskId);
+                                  return selectedTask ? `${selectedTask.identifier} · ${selectedTask.title}` : "Choose a task";
+                                })()}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">Choose a task</SelectItem>
@@ -1039,33 +1358,116 @@ export function TaskDetailPanel({
                 </div>
               </section>
 
-              <section className="space-y-4 rounded-xl border bg-white p-4">
+              <section className="surface-panel space-y-4 rounded-xl border p-4">
                 <div className="flex items-center gap-2">
-                  <MessageSquareText className="size-4 text-slate-500" />
+                  <MessageSquareText className="size-4 text-muted-foreground" />
                   <div>
-                    <p className="text-sm font-semibold text-slate-800">Comments</p>
+                    <p className="text-sm font-semibold text-foreground">Comments</p>
                     <p className="text-xs text-muted-foreground">Keep delivery notes and decisions on the task.</p>
                   </div>
                 </div>
 
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" variant={commentFilter === "all" ? "secondary" : "outline"} size="sm" onClick={() => setCommentFilter("all")}>
+                    All comments
+                  </Button>
+                  <Button type="button" variant={commentFilter === "decisions" ? "secondary" : "outline"} size="sm" onClick={() => setCommentFilter("decisions")}>
+                    Decisions only
+                  </Button>
+                  <Badge variant="outline">{comments.filter((comment) => comment.is_decision && !comment.deleted_at).length} decisions</Badge>
+                </div>
+
                 {isLoadingThread ? (
                   <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Loading comments...</div>
-                ) : comments.length === 0 ? (
-                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No comments yet.</div>
+                ) : visibleComments.length === 0 ? (
+                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                    {commentFilter === "decisions" ? "No decision notes yet." : "No comments yet."}
+                  </div>
                 ) : (
                   <div className="space-y-3">
-                    {comments.map((comment) => (
-                      <article key={comment.id} className="rounded-lg border bg-slate-50 p-3">
+                    {visibleComments.map((comment) => (
+                      <article key={comment.id} className="surface-subpanel rounded-lg border p-3">
                         <div className="mb-2 flex items-center gap-2">
                           <Avatar size="sm">
                             <AvatarFallback>{toInitials(comment.authorName)}</AvatarFallback>
                           </Avatar>
-                          <div>
-                            <p className="text-sm font-medium text-slate-900">{comment.authorName}</p>
-                            <p className="text-xs text-muted-foreground">{toRelativeTime(comment.created_at)}</p>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-foreground">{comment.authorName}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                              <span>{toRelativeTime(comment.created_at)}</span>
+                              {comment.is_decision ? <Badge variant="outline">Decision</Badge> : null}
+                              {comment.edited_at ? <Badge variant="secondary">Edited</Badge> : null}
+                              {comment.deleted_at ? <Badge variant="secondary">Deleted</Badge> : null}
+                            </div>
                           </div>
+                          {comment.user_id === currentUserId && !readOnly && !comment.deleted_at ? (
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => beginEditingComment(comment)}
+                                disabled={isUpdatingComment && pendingCommentId === comment.id}
+                              >
+                                <Pencil className="size-4" />
+                                Edit
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => deleteComment(comment)}
+                                disabled={isUpdatingComment && pendingCommentId === comment.id}
+                              >
+                                <Trash2 className="size-4" />
+                                Delete
+                              </Button>
+                            </div>
+                          ) : null}
                         </div>
-                        <p className="whitespace-pre-wrap text-sm text-slate-700">{comment.content}</p>
+
+                        {comment.deleted_at ? (
+                          <p className="text-sm italic text-muted-foreground">Comment deleted.</p>
+                        ) : editingCommentId === comment.id ? (
+                          <div className="space-y-3">
+                            <textarea
+                              value={editingCommentContent}
+                              onChange={(event) => setEditingCommentContent(event.target.value)}
+                              className="surface-subpanel min-h-[110px] w-full resize-y rounded-lg border border-border p-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                              disabled={isUpdatingComment}
+                            />
+                            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <input
+                                type="checkbox"
+                                checked={editingCommentIsDecision}
+                                onChange={(event) => setEditingCommentIsDecision(event.target.checked)}
+                                disabled={isUpdatingComment}
+                              />
+                              Mark as decision
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => saveCommentEdit(comment)}
+                                disabled={isUpdatingComment && pendingCommentId === comment.id}
+                              >
+                                {isUpdatingComment && pendingCommentId === comment.id ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
+                                Save comment
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={cancelEditingComment}
+                                disabled={isUpdatingComment && pendingCommentId === comment.id}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
+                        )}
                       </article>
                     ))}
                   </div>
@@ -1077,10 +1479,19 @@ export function TaskDetailPanel({
                     id="task-comment"
                     value={newComment}
                     onChange={(event) => setNewComment(event.target.value)}
-                    className="min-h-[110px] w-full resize-y rounded-lg border border-slate-200 p-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                    className="surface-subpanel min-h-[110px] w-full resize-y rounded-lg border border-border p-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
                     placeholder="Share an update, a decision, or what you need from the team."
                     disabled={readOnly}
                   />
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={newCommentIsDecision}
+                      onChange={(event) => setNewCommentIsDecision(event.target.checked)}
+                      disabled={readOnly || isPostingComment}
+                    />
+                    Mark as decision
+                  </label>
                 </div>
 
                 <Button type="button" variant="outline" onClick={postComment} disabled={readOnly || isPostingComment || !newComment.trim()}>
@@ -1091,32 +1502,32 @@ export function TaskDetailPanel({
             </div>
           </div>
 
-          <aside className="min-h-0 overflow-y-auto bg-slate-50/60 px-6 py-5">
+          <aside className="surface-shell min-h-0 overflow-y-auto px-6 py-5">
             <div className="space-y-4">
-              <section className="rounded-xl border bg-white p-4">
-                <p className="text-sm font-semibold text-slate-800">Snapshot</p>
+              <section className="surface-panel rounded-xl border p-4">
+                <p className="text-sm font-semibold text-foreground">Snapshot</p>
                 <div className="mt-3 space-y-3 text-sm">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Assignee</span>
-                    <span className="font-medium text-slate-900">
+                    <span className="font-medium text-foreground">
                       {draft.assigneeId === "unassigned"
                         ? "Unassigned"
-                        : memberNameMap[draft.assigneeId] ?? `User ${draft.assigneeId.slice(0, 8)}`}
+                        : getMemberDisplayName(memberNameMap[draft.assigneeId])}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Priority</span>
-                    <span className="font-medium text-slate-900">{PRIORITY_CONFIG[draft.priority].label}</span>
+                    <span className="font-medium text-foreground">{PRIORITY_CONFIG[draft.priority].label}</span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Due date</span>
-                    <span className={cn("font-medium", draft.dueDate ? "text-slate-900" : "text-muted-foreground")}>
+                    <span className={cn("font-medium", draft.dueDate ? "text-foreground" : "text-muted-foreground")}>
                       {draft.dueDate || "Not set"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Milestone</span>
-                    <span className="font-medium text-slate-900">
+                    <span className="font-medium text-foreground">
                       {draft.milestoneId === "none"
                         ? "None"
                         : milestones.find((milestone) => milestone.id === draft.milestoneId)?.name ?? "None"}
@@ -1124,35 +1535,47 @@ export function TaskDetailPanel({
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Created</span>
-                    <span className="font-medium text-slate-900">{toRelativeTime(task.created_at)}</span>
+                    <span className="font-medium text-foreground">{toRelativeTime(task.created_at)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Due state</span>
-                    <span className={cn("font-medium", dueState === "overdue" ? "text-red-700" : dueState === "due-soon" ? "text-amber-700" : "text-slate-900")}>
+                    <span className={cn("font-medium", dueState === "overdue" ? "text-red-700 dark:text-red-300" : dueState === "due-soon" ? "text-amber-700 dark:text-amber-300" : "text-foreground")}>
                       {dueState === "overdue" ? "Overdue" : dueState === "due-soon" ? "Due soon" : "On track"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Blocked by</span>
-                    <span className="font-medium text-slate-900">{blockedByMap[task.id]?.length ?? 0}</span>
+                    <span className="font-medium text-foreground">{blockedByMap[task.id]?.length ?? 0}</span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Blocking</span>
-                    <span className="font-medium text-slate-900">{blockingMap[task.id]?.length ?? 0}</span>
+                    <span className="font-medium text-foreground">{blockingMap[task.id]?.length ?? 0}</span>
                   </div>
                 </div>
+
+                {customFieldSnapshotItems.length > 0 ? (
+                  <div className="mt-4 space-y-3 border-t pt-4 text-sm">
+                    <p className="font-medium text-foreground">Custom field values</p>
+                    {customFieldSnapshotItems.map(({ field, value }) => (
+                      <div key={field.id} className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{field.name}</span>
+                        <span className="font-medium text-foreground">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </section>
 
-              <section className="rounded-xl border bg-white p-4">
+              <section className="surface-panel rounded-xl border p-4">
                 <div className="flex items-center gap-2">
-                  <Paperclip className="size-4 text-slate-500" />
+                  <Paperclip className="size-4 text-muted-foreground" />
                   <div>
-                    <p className="text-sm font-semibold text-slate-800">Attachments</p>
+                    <p className="text-sm font-semibold text-foreground">Attachments</p>
                     <p className="text-xs text-muted-foreground">Upload files directly onto the task.</p>
                   </div>
                 </div>
 
-                <div className="mt-4 rounded-lg border border-dashed p-3">
+                <div className="surface-subpanel mt-4 rounded-lg border border-dashed p-3">
                   <Label htmlFor="task-attachment-upload" className="text-sm font-medium">
                     Upload file
                   </Label>
@@ -1173,10 +1596,10 @@ export function TaskDetailPanel({
                     <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No attachments yet.</div>
                   ) : (
                     attachments.map((attachment) => (
-                      <div key={attachment.id} className="rounded-lg border bg-slate-50 p-3">
+                      <div key={attachment.id} className="surface-subpanel rounded-lg border p-3">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-sm font-medium text-slate-900">{attachment.file_name}</p>
+                            <p className="text-sm font-medium text-foreground">{attachment.file_name}</p>
                             <p className="mt-1 text-xs text-muted-foreground">
                               Added {toRelativeTime(attachment.created_at)}
                             </p>
@@ -1192,9 +1615,9 @@ export function TaskDetailPanel({
                 </div>
               </section>
 
-              <section className="rounded-xl border bg-white p-4">
-                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
-                  <History className="size-4 text-slate-500" />
+              <section className="surface-panel rounded-xl border p-4">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <History className="size-4 text-muted-foreground" />
                   Recent activity
                 </div>
                 {activityItems.length === 0 ? (
@@ -1219,9 +1642,9 @@ export function TaskDetailPanel({
                 )}
               </section>
 
-              <section className="rounded-xl border bg-white p-4">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                  <CalendarDays className="size-4 text-slate-500" />
+              <section className="surface-panel rounded-xl border p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <CalendarDays className="size-4 text-muted-foreground" />
                   Delivery notes
                 </div>
                 <p className="mt-2 text-sm text-muted-foreground">
@@ -1232,7 +1655,7 @@ export function TaskDetailPanel({
           </aside>
         </div>
 
-        <DialogFooter className="border-t px-6 py-4">
+        <DialogFooter className="surface-shell border-t px-6 py-4">
           <Button type="button" variant="outline" onClick={duplicateTask} disabled={readOnly || isDuplicating || isDeleting}>
             {isDuplicating ? <LoaderCircle className="size-4 animate-spin" /> : <Copy className="size-4" />}
             Duplicate task

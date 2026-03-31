@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 function PageBlock({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn("rounded-2xl border bg-card p-6 shadow-sm", className)}>{children}</div>;
+  return <div className={cn("surface-panel rounded-2xl border p-6 shadow-sm", className)}>{children}</div>;
 }
 
 function HeadingSkeleton({ compact = false }: { compact?: boolean }) {
@@ -33,8 +33,8 @@ function StatGridSkeleton() {
 
 export function RootLoading() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-12">
-      <div className="w-full max-w-md rounded-3xl border bg-card p-8 shadow-sm">
+    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
+      <div className="surface-panel w-full max-w-md rounded-3xl border p-8 shadow-sm">
         <div className="space-y-4">
           <Skeleton className="h-4 w-16 rounded-full" />
           <Skeleton className="h-10 w-44 rounded-2xl" />
@@ -51,8 +51,8 @@ export function RootLoading() {
 
 export function AuthPageLoading() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-12">
-      <div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm">
+    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
+      <div className="surface-panel w-full max-w-md rounded-3xl border p-6 shadow-sm">
         <div className="space-y-6">
           <div className="space-y-3">
             <Skeleton className="h-8 w-52 rounded-xl" />
@@ -131,7 +131,7 @@ export function DashboardPageLoading() {
 export function CreateWorkspacePageLoading() {
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="w-full max-w-lg rounded-3xl border bg-card p-6 shadow-sm">
+      <div className="surface-panel w-full max-w-lg rounded-3xl border p-6 shadow-sm">
         <div className="space-y-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-3">

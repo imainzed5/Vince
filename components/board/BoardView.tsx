@@ -20,10 +20,15 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DEFAULT_PROJECT_SAVED_VIEW_CONFIG,
+  parseProjectSavedViewConfig,
+  type ProjectAttentionFilter,
+  type ProjectListSortOption,
+} from "@/lib/pm-config";
 import { Progress, ProgressLabel } from "@/components/ui/progress";
 import { createClient } from "@/lib/supabase/client";
 import { insertActivity } from "@/lib/supabase/activity";
-import { BOARD_COLUMNS, isTaskStatus } from "@/components/board/config";
 import { BoardToolbar } from "@/components/board/BoardToolbar";
 import { BoardColumn } from "@/components/board/BoardColumn";
 import { TaskCard } from "@/components/board/TaskCard";
@@ -31,9 +36,16 @@ import { QuickCreateModal } from "@/components/board/QuickCreateModal";
 import { TaskListView } from "@/components/tasks/TaskListView";
 import { TaskDetailPanel } from "@/components/tasks/TaskDetailPanel";
 import { useTasks } from "@/hooks/useTasks";
-import { buildTaskDependencyMaps } from "@/lib/task-insights";
+import {
+  getDefaultOpenTaskStatus,
+  getTaskStatusColumns,
+  isDoneTaskStatus,
+  withTaskStatusFallbacks,
+} from "@/lib/task-statuses";
+import { buildTaskDependencyMaps, getTaskDueState } from "@/lib/task-insights";
+import { getMemberDisplayName } from "@/lib/utils/displayName";
 import { useTaskStore } from "@/stores/taskStore";
-import type { Task, TaskPriority, TaskStatus } from "@/types";
+import type { Task, TaskCustomFieldDefinition, TaskPriority, TaskStatus, WorkspaceTaskStatusDefinition } from "@/types";
 import type { Database } from "@/types/database.types";
 
 type BoardViewProps = {
@@ -45,10 +57,13 @@ type BoardViewProps = {
   projectStatus: string;
   members?: Array<{ id: string; name: string; role: string }>;
   milestones?: Array<Database["public"]["Tables"]["milestones"]["Row"]>;
+  customFieldDefinitions?: TaskCustomFieldDefinition[];
+  taskStatuses?: WorkspaceTaskStatusDefinition[];
   currentUserId: string;
 };
 
-type TaskGroups = Record<TaskStatus, Task[]>;
+type TaskGroups = Record<string, Task[]>;
+type SavedViewRow = Database["public"]["Tables"]["saved_views"]["Row"];
 
 const PHASE_LABELS: Record<"planning" | "in_progress" | "in_review" | "done", string> = {
   planning: "Planning",
@@ -65,33 +80,28 @@ function getPhaseLabel(phase: string): string {
   return phase;
 }
 
-function groupTasks(tasks: Task[]): TaskGroups {
-  const base: TaskGroups = {
-    backlog: [],
-    todo: [],
-    in_progress: [],
-    in_review: [],
-    done: [],
-  };
+function groupTasks(tasks: Task[], statuses: string[]): TaskGroups {
+  const base = Object.fromEntries(statuses.map((status) => [status, [] as Task[]])) as TaskGroups;
 
   for (const task of tasks) {
+    base[task.status] ??= [];
     base[task.status].push(task);
   }
 
-  for (const status of Object.keys(base) as TaskStatus[]) {
+  for (const status of Object.keys(base)) {
     base[status].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   }
 
   return base;
 }
 
-function flattenWithPositions(groups: TaskGroups): Task[] {
+function flattenWithPositions(groups: TaskGroups, statuses: string[]): Task[] {
   const next: Task[] = [];
 
-  for (const column of BOARD_COLUMNS) {
-    const ordered = groups[column.status].map((task, index) => ({
+  for (const status of statuses) {
+    const ordered = (groups[status] ?? []).map((task, index) => ({
       ...task,
-      status: column.status,
+      status,
       position: index,
     }));
 
@@ -119,6 +129,12 @@ function initials(value: string): string {
   return value.replace(/-/g, "").slice(0, 2).toUpperCase();
 }
 
+function sortSavedViews(items: SavedViewRow[]): SavedViewRow[] {
+  return [...items].sort(
+    (left, right) => new Date(left.created_at ?? 0).getTime() - new Date(right.created_at ?? 0).getTime(),
+  );
+}
+
 export function BoardView({
   workspaceId,
   projectId,
@@ -128,6 +144,8 @@ export function BoardView({
   projectStatus,
   members = [],
   milestones = [],
+  customFieldDefinitions = [],
+  taskStatuses = [],
   currentUserId,
 }: BoardViewProps) {
   const pathname = usePathname();
@@ -149,9 +167,16 @@ export function BoardView({
   const [newTaskStatus, setNewTaskStatus] = useState<TaskStatus>("backlog");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "all">("all");
+  const [milestoneFilter, setMilestoneFilter] = useState<string>("all");
+  const [attentionFilter, setAttentionFilter] = useState<ProjectAttentionFilter>("all");
+  const [sortOption, setSortOption] = useState<ProjectListSortOption>("board_order");
+  const [savedViews, setSavedViews] = useState<SavedViewRow[]>([]);
+  const [selectedSavedViewId, setSelectedSavedViewId] = useState<string>("none");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null);
   const [enteringTaskIds, setEnteringTaskIds] = useState<string[]>([]);
+  const [isSavingView, setIsSavingView] = useState(false);
+  const [isDeletingView, setIsDeletingView] = useState(false);
   const highlightTimeoutRef = useRef<number | null>(null);
   const enteringTimeoutsRef = useRef<Map<string, number>>(new Map());
 
@@ -164,7 +189,16 @@ export function BoardView({
     useSensor(KeyboardSensor),
   );
 
-  const filteredTasks = useMemo(() => {
+  const { blockedByMap, blockingMap } = useMemo(() => buildTaskDependencyMaps(dependencies), [dependencies]);
+  const taskStatusDefinitions = useMemo(
+    () => withTaskStatusFallbacks(taskStatuses, tasks.map((task) => task.status)),
+    [taskStatuses, tasks],
+  );
+  const taskStatusColumns = useMemo(() => getTaskStatusColumns(taskStatusDefinitions), [taskStatusDefinitions]);
+  const taskStatusKeys = useMemo(() => taskStatusColumns.map((column) => column.status), [taskStatusColumns]);
+  const taskStatusSet = useMemo(() => new Set(taskStatusKeys), [taskStatusKeys]);
+
+  const visibleTasks = useMemo(() => {
     return tasks.filter((task) => {
       if (assigneeFilter !== "all" && task.assignee_id !== assigneeFilter) {
         return false;
@@ -174,12 +208,72 @@ export function BoardView({
         return false;
       }
 
+      if (milestoneFilter !== "all" && task.milestone_id !== milestoneFilter) {
+        return false;
+      }
+
+      if (attentionFilter === "blocked" && !(task.is_blocked || (blockedByMap[task.id]?.length ?? 0) > 0)) {
+        return false;
+      }
+
+      if (attentionFilter === "overdue" && getTaskDueState(task, undefined, taskStatusDefinitions) !== "overdue") {
+        return false;
+      }
+
+      if (attentionFilter === "due_soon" && getTaskDueState(task, undefined, taskStatusDefinitions) !== "due-soon") {
+        return false;
+      }
+
+      if (attentionFilter === "blocking_others" && (blockingMap[task.id]?.length ?? 0) === 0) {
+        return false;
+      }
+
       return true;
     });
-  }, [assigneeFilter, priorityFilter, tasks]);
+  }, [assigneeFilter, attentionFilter, blockedByMap, blockingMap, milestoneFilter, priorityFilter, taskStatusDefinitions, tasks]);
 
-  const taskGroups = useMemo(() => groupTasks(filteredTasks), [filteredTasks]);
   const viewMode = searchParams.get("view") === "list" ? "list" : "board";
+  const taskGroups = useMemo(() => groupTasks(visibleTasks, taskStatusKeys), [taskStatusKeys, visibleTasks]);
+  const listTasks = useMemo(() => {
+    const nextTasks = [...visibleTasks];
+
+    if (sortOption === "board_order") {
+      const statusRank = Object.fromEntries(taskStatusColumns.map((column, index) => [column.status, index])) as Record<string, number>;
+
+      return nextTasks.sort((left, right) => {
+        const leftRank = statusRank[left.status];
+        const rightRank = statusRank[right.status];
+
+        if (leftRank !== rightRank) {
+          return leftRank - rightRank;
+        }
+
+        return (left.position ?? 0) - (right.position ?? 0);
+      });
+    }
+
+    if (sortOption === "priority") {
+      const rank: Record<TaskPriority, number> = { urgent: 0, high: 1, medium: 2, none: 3 };
+      return nextTasks.sort((left, right) => rank[left.priority as TaskPriority] - rank[right.priority as TaskPriority]);
+    }
+
+    if (sortOption === "newest") {
+      return nextTasks.sort(
+        (left, right) => new Date(right.created_at ?? 0).getTime() - new Date(left.created_at ?? 0).getTime(),
+      );
+    }
+
+    return nextTasks.sort((left, right) => {
+      const leftDue = left.due_date ? new Date(left.due_date).getTime() : Number.MAX_SAFE_INTEGER;
+      const rightDue = right.due_date ? new Date(right.due_date).getTime() : Number.MAX_SAFE_INTEGER;
+
+      if (leftDue !== rightDue) {
+        return leftDue - rightDue;
+      }
+
+      return new Date(right.created_at ?? 0).getTime() - new Date(left.created_at ?? 0).getTime();
+    });
+  }, [sortOption, taskStatusColumns, visibleTasks]);
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedTaskId) ?? null,
     [selectedTaskId, tasks],
@@ -189,7 +283,12 @@ export function BoardView({
     [activeTaskId, tasks],
   );
   const enteringTaskIdSet = useMemo(() => new Set(enteringTaskIds), [enteringTaskIds]);
-  const hasActiveFilters = assigneeFilter !== "all" || priorityFilter !== "all";
+  const hasActiveFilters =
+    assigneeFilter !== "all" ||
+    priorityFilter !== "all" ||
+    milestoneFilter !== "all" ||
+    attentionFilter !== "all" ||
+    sortOption !== "board_order";
   const isReadOnly = projectStatus === "archived";
 
   const clearEnteringTask = useCallback((taskId: string) => {
@@ -271,9 +370,9 @@ export function BoardView({
       return 0;
     }
 
-    const doneCount = tasks.filter((task) => task.status === "done").length;
+    const doneCount = tasks.filter((task) => isDoneTaskStatus(task.status, taskStatusDefinitions)).length;
     return Math.round((doneCount / tasks.length) * 100);
-  }, [tasks]);
+  }, [taskStatusDefinitions, tasks]);
 
   const uniqueAssignees = useMemo(() => {
     return Array.from(new Set(tasks.map((task) => task.assignee_id).filter(Boolean) as string[]));
@@ -288,11 +387,14 @@ export function BoardView({
     () =>
       uniqueAssignees.map((assigneeId) => ({
         id: assigneeId,
-        name: memberNameMap[assigneeId] ?? `User ${assigneeId.slice(0, 8)}`,
+        name: getMemberDisplayName(memberNameMap[assigneeId]),
       })),
     [memberNameMap, uniqueAssignees],
   );
-  const { blockedByMap, blockingMap } = useMemo(() => buildTaskDependencyMaps(dependencies), [dependencies]);
+  const milestoneOptions = useMemo(
+    () => milestones.map((milestone) => ({ id: milestone.id, name: milestone.name })),
+    [milestones],
+  );
 
   const setViewMode = useCallback(
     (nextViewMode: "board" | "list") => {
@@ -310,11 +412,106 @@ export function BoardView({
     [pathname, router, searchParams],
   );
 
+  const currentSavedViewConfig = useMemo(
+    () => ({
+      assigneeFilter,
+      priorityFilter,
+      attentionFilter,
+      milestoneFilter,
+      viewMode,
+      sortOption,
+    }),
+    [assigneeFilter, attentionFilter, milestoneFilter, priorityFilter, sortOption, viewMode],
+  );
+
+  const applySavedView = useCallback(
+    (config: ReturnType<typeof parseProjectSavedViewConfig>) => {
+      setAssigneeFilter(config.assigneeFilter);
+      setPriorityFilter(config.priorityFilter);
+      setAttentionFilter(config.attentionFilter);
+      setMilestoneFilter(config.milestoneFilter);
+      setSortOption(config.sortOption);
+      setViewMode(config.viewMode);
+    },
+    [setViewMode],
+  );
+
+  useEffect(() => {
+    let isActive = true;
+
+    void supabase
+      .from("saved_views")
+      .select("*")
+      .eq("scope", "project")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (!isActive) {
+          return;
+        }
+
+        if (error) {
+          toast.error(error.message);
+          return;
+        }
+
+        setSavedViews(sortSavedViews((data ?? []) as SavedViewRow[]));
+      });
+
+    const channel = supabase.channel(`project-saved-views:${projectId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "saved_views",
+          filter: `project_id=eq.${projectId}`,
+        },
+        (payload) => {
+          const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as SavedViewRow;
+
+          if (payload.eventType === "DELETE") {
+            setSavedViews((current) => current.filter((view) => view.id !== row.id));
+            setSelectedSavedViewId((current) => (current === row.id ? "none" : current));
+            return;
+          }
+
+          if (payload.eventType === "INSERT") {
+            setSavedViews((current) => sortSavedViews([...current.filter((view) => view.id !== row.id), row]));
+            return;
+          }
+
+          setSavedViews((current) => sortSavedViews(current.map((view) => (view.id === row.id ? row : view))));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      isActive = false;
+      void supabase.removeChannel(channel);
+    };
+  }, [projectId, supabase]);
+
   useEffect(() => {
     if (selectedTaskId && !tasks.some((task) => task.id === selectedTaskId)) {
       setSelectedTaskId(null);
     }
   }, [selectedTaskId, setSelectedTaskId, tasks]);
+
+  useEffect(() => {
+    if (selectedSavedViewId === "none") {
+      return;
+    }
+
+    const savedView = savedViews.find((view) => view.id === selectedSavedViewId);
+
+    if (!savedView) {
+      setSelectedSavedViewId("none");
+      return;
+    }
+
+    applySavedView(parseProjectSavedViewConfig(savedView.config));
+  }, [applySavedView, savedViews, selectedSavedViewId]);
 
   useEffect(() => {
     if (isReadOnly) {
@@ -327,7 +524,7 @@ export function BoardView({
 
       if ((event.key === "c" || event.key === "C") && !isTyping && !event.metaKey && !event.ctrlKey) {
         event.preventDefault();
-        setNewTaskStatus("backlog");
+        setNewTaskStatus(getDefaultOpenTaskStatus(taskStatusDefinitions) as TaskStatus);
         setIsModalOpen(true);
       }
     };
@@ -337,7 +534,7 @@ export function BoardView({
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isReadOnly]);
+  }, [isReadOnly, taskStatusDefinitions]);
 
   const openCreateTask = (status: TaskStatus) => {
     if (isReadOnly) {
@@ -387,7 +584,7 @@ export function BoardView({
 
     const sourceStatus = activeTask.status;
 
-    const destinationStatus = isTaskStatus(overId)
+    const destinationStatus = taskStatusSet.has(overId)
       ? overId
       : previousTasks.find((task) => task.id === overId)?.status;
 
@@ -395,7 +592,7 @@ export function BoardView({
       return;
     }
 
-    const nextGroups = groupTasks(previousTasks);
+    const nextGroups = groupTasks(previousTasks, taskStatusKeys);
     const sourceList = nextGroups[sourceStatus].map((task) => ({ ...task }));
     const targetList = sourceStatus === destinationStatus
       ? sourceList
@@ -412,7 +609,7 @@ export function BoardView({
 
     let targetIndex = targetList.length;
 
-    if (!isTaskStatus(overId)) {
+    if (!taskStatusSet.has(overId)) {
       const overIndex = targetList.findIndex((task) => task.id === overId);
       if (overIndex >= 0) {
         targetIndex = overIndex;
@@ -428,7 +625,7 @@ export function BoardView({
       nextGroups[destinationStatus] = targetList;
     }
 
-    const optimistic = flattenWithPositions(nextGroups);
+    const optimistic = flattenWithPositions(nextGroups, taskStatusKeys);
     const changedTasks = getChangedTasks(previousTasks, optimistic);
 
     if (!changedTasks.length) {
@@ -532,6 +729,85 @@ export function BoardView({
     setTasks((current) => current.filter((task) => task.id !== taskId));
   };
 
+  const saveCurrentView = async () => {
+    const suggestedName = savedViews.length === 0 ? "Focus view" : `View ${savedViews.length + 1}`;
+    const name = window.prompt("Name this saved view", suggestedName)?.trim();
+
+    if (!name) {
+      return;
+    }
+
+    setIsSavingView(true);
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      setIsSavingView(false);
+      toast.error(userError?.message ?? "Could not identify the current user.");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("saved_views")
+      .insert({
+        user_id: user.id,
+        scope: "project",
+        project_id: projectId,
+        name,
+        config: currentSavedViewConfig,
+      })
+      .select("*")
+      .single();
+
+    setIsSavingView(false);
+
+    if (error || !data) {
+      toast.error(error?.code === "23505" ? "A saved view with that name already exists." : error?.message ?? "Could not save view.");
+      return;
+    }
+
+    setSavedViews((current) => sortSavedViews([...current.filter((view) => view.id !== data.id), data as SavedViewRow]));
+    setSelectedSavedViewId(data.id);
+    toast.success("Saved view created.");
+  };
+
+  const deleteSavedView = async () => {
+    if (selectedSavedViewId === "none") {
+      return;
+    }
+
+    const savedView = savedViews.find((view) => view.id === selectedSavedViewId);
+
+    if (!savedView) {
+      setSelectedSavedViewId("none");
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete the saved view \"${savedView.name}\"?`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsDeletingView(true);
+
+    const { error } = await supabase.from("saved_views").delete().eq("id", savedView.id);
+
+    setIsDeletingView(false);
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    setSavedViews((current) => current.filter((view) => view.id !== savedView.id));
+    setSelectedSavedViewId("none");
+    toast.success("Saved view deleted.");
+  };
+
   return (
     <div className="space-y-4">
       {isReadOnly ? (
@@ -542,10 +818,10 @@ export function BoardView({
         </Alert>
       ) : null}
 
-      <header className="rounded-xl border bg-white p-4">
+      <header className="surface-panel rounded-xl border p-4 shadow-sm dark:shadow-none">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">{projectName}</h1>
+            <h1 className="text-2xl font-semibold text-foreground">{projectName}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <Badge variant="outline">
                 {getPhaseLabel(projectPhase)}
@@ -571,7 +847,7 @@ export function BoardView({
           <AvatarGroup>
             {uniqueAssignees.slice(0, 4).map((assigneeId) => (
               <Avatar key={assigneeId} size="sm">
-                <AvatarFallback>{initials(memberNameMap[assigneeId] ?? assigneeId)}</AvatarFallback>
+                <AvatarFallback>{initials(getMemberDisplayName(memberNameMap[assigneeId]))}</AvatarFallback>
               </Avatar>
             ))}
           </AvatarGroup>
@@ -579,7 +855,7 @@ export function BoardView({
       </header>
 
       <BoardToolbar
-        onCreateTask={() => openCreateTask("backlog")}
+        onCreateTask={() => openCreateTask(getDefaultOpenTaskStatus(taskStatusDefinitions) as TaskStatus)}
         onViewModeChange={setViewMode}
         createDisabled={isReadOnly}
         assigneeOptions={assigneeOptions}
@@ -587,17 +863,32 @@ export function BoardView({
         onAssigneeFilterChange={setAssigneeFilter}
         priorityFilter={priorityFilter}
         onPriorityFilterChange={setPriorityFilter}
-        visibleTaskCount={filteredTasks.length}
+        milestoneOptions={milestoneOptions}
+        milestoneFilter={milestoneFilter}
+        onMilestoneFilterChange={setMilestoneFilter}
+        attentionFilter={attentionFilter}
+        onAttentionFilterChange={setAttentionFilter}
+        sortOption={sortOption}
+        onSortOptionChange={setSortOption}
+        savedViews={savedViews.map((view) => ({ id: view.id, name: view.name }))}
+        selectedSavedViewId={selectedSavedViewId}
+        onSavedViewSelect={setSelectedSavedViewId}
+        onSaveCurrentView={saveCurrentView}
+        onDeleteSavedView={deleteSavedView}
+        isSavingView={isSavingView}
+        isDeletingView={isDeletingView}
+        visibleTaskCount={visibleTasks.length}
         totalTaskCount={tasks.length}
         viewMode={viewMode}
       />
 
       {isLoading ? (
-        <div className="rounded-lg border bg-white p-6 text-sm text-slate-500">Loading board...</div>
+        <div className="surface-panel rounded-lg border p-6 text-sm text-muted-foreground shadow-sm dark:shadow-none">Loading board...</div>
       ) : viewMode === "list" ? (
         <TaskListView
-          tasks={filteredTasks}
+          tasks={listTasks}
           milestones={milestones}
+          taskStatuses={taskStatusDefinitions}
           memberNameMap={memberNameMap}
           blockedByMap={blockedByMap}
           blockingMap={blockingMap}
@@ -612,13 +903,14 @@ export function BoardView({
           onDragEnd={handleDragEnd}
         >
           <div className="flex gap-4 overflow-x-auto pb-2">
-            {BOARD_COLUMNS.map((column) => (
+            {taskStatusColumns.map((column) => (
               <BoardColumn
                 key={column.status}
                 label={column.label}
-                status={column.status}
+                status={column.status as TaskStatus}
                 color={column.dotColor}
-                tasks={taskGroups[column.status]}
+                tasks={taskGroups[column.status] ?? []}
+                taskStatuses={taskStatusDefinitions}
                 blockedByMap={blockedByMap}
                 blockingMap={blockingMap}
                 onAddTask={openCreateTask}
@@ -641,6 +933,7 @@ export function BoardView({
               <div className="w-[300px] max-w-[300px]">
                 <TaskCard
                   task={activeTask}
+                  taskStatuses={taskStatusDefinitions}
                   onOpenTask={openTaskPanel}
                   isDragDisabled
                   isOverlay
@@ -657,6 +950,8 @@ export function BoardView({
         workspaceId={workspaceId}
         projectId={projectId}
         projectPrefix={projectPrefix}
+        assignees={members}
+        taskStatuses={taskStatusDefinitions}
         readOnly={isReadOnly}
         defaultStatus={newTaskStatus}
         onOptimisticCreate={handleOptimisticCreate}
@@ -676,9 +971,11 @@ export function BoardView({
         projectId={projectId}
         task={selectedTask}
         tasks={tasks}
+        taskStatuses={taskStatusDefinitions}
         dependencies={dependencies}
         milestones={milestones}
         members={members}
+        customFieldDefinitions={customFieldDefinitions}
         currentUserId={currentUserId}
         readOnly={isReadOnly}
         onTaskUpdated={handleTaskUpdated}
@@ -687,7 +984,7 @@ export function BoardView({
       />
 
       {toastMessage ? (
-        <div className="fixed bottom-4 right-4 z-50 rounded-md border border-red-200 bg-white px-4 py-3 text-sm text-red-700 shadow-lg">
+        <div className="fixed bottom-4 right-4 z-50 rounded-md border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-700 shadow-lg backdrop-blur dark:border-red-500/35 dark:bg-red-500/10 dark:text-red-200">
           {toastMessage}
         </div>
       ) : null}

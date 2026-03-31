@@ -5,6 +5,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 
 import { insertNotifications } from "@/lib/collaboration";
+import { normalizeKeyOutcomes, parseProjectKeyOutcomes, parseProjectTemplateConfig } from "@/lib/pm-config";
 import { insertActivity } from "@/lib/supabase/activity";
 import { isValidProjectPrefix, normalizeProjectPrefix } from "@/lib/project-prefix";
 import { createClient } from "@/lib/supabase/server";
@@ -13,6 +14,8 @@ import type { Database } from "@/types/database.types";
 type ProjectRow = Database["public"]["Tables"]["projects"]["Row"];
 type MilestoneRow = Database["public"]["Tables"]["milestones"]["Row"];
 type ProjectShareRow = Database["public"]["Tables"]["project_shares"]["Row"];
+type ProjectStatusUpdateRow = Database["public"]["Tables"]["project_status_updates"]["Row"];
+type ProjectTemplateRow = Database["public"]["Tables"]["project_templates"]["Row"];
 type StandupRow = Database["public"]["Tables"]["standups"]["Row"];
 type TaskDependencyRow = Database["public"]["Tables"]["task_dependencies"]["Row"];
 type TaskRow = Database["public"]["Tables"]["tasks"]["Row"];
@@ -32,7 +35,10 @@ type ProjectActionResult = {
   share?: ProjectShareRow;
   shareId?: string;
   sharePath?: string;
+  statusUpdate?: ProjectStatusUpdateRow;
   standup?: StandupRow;
+  template?: ProjectTemplateRow;
+  templateId?: string;
 };
 
 type UpdateProjectPrefixInput = {
@@ -53,8 +59,10 @@ type UpdateProjectBriefInput = {
   projectId: string;
   ownerId: string;
   targetDate: string;
+  goalStatement: string;
   successMetric: string;
   scopeSummary: string;
+  keyOutcomes: string[];
 };
 
 type UpdateProjectPhaseInput = {
@@ -96,6 +104,16 @@ type AddStandupInput = {
   blockers: string;
 };
 
+type AddProjectStatusUpdateInput = {
+  workspaceId: string;
+  projectId: string;
+  health: "on_track" | "at_risk" | "off_track";
+  headline: string;
+  summary: string;
+  risks: string;
+  nextSteps: string;
+};
+
 type AddTaskDependencyInput = {
   workspaceId: string;
   projectId: string;
@@ -121,8 +139,22 @@ type RevokeProjectShareInput = {
   shareId: string;
 };
 
+type CreateProjectTemplateInput = {
+  workspaceId: string;
+  projectId: string;
+  name: string;
+  description: string;
+};
+
+type DeleteProjectTemplateInput = {
+  workspaceId: string;
+  projectId: string;
+  templateId: string;
+};
+
 const VALID_PROJECT_PHASES = new Set<ProjectPhase>(["planning", "in_progress", "in_review", "done"]);
 const VALID_PROJECT_STATUSES = new Set<ProjectStatus>(["active", "archived"]);
+const VALID_PROJECT_UPDATE_HEALTH = new Set<AddProjectStatusUpdateInput["health"]>(["on_track", "at_risk", "off_track"]);
 
 function createShareToken() {
   return randomBytes(24).toString("hex");
@@ -130,6 +162,24 @@ function createShareToken() {
 
 function buildSharePath(shareToken: string) {
   return `/share/${shareToken}`;
+}
+
+function buildSummaryPreview(value: string) {
+  const normalizedValue = value.trim().replace(/\s+/g, " ");
+
+  if (normalizedValue.length <= 160) {
+    return normalizedValue;
+  }
+
+  return `${normalizedValue.slice(0, 157)}...`;
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
 }
 
 function createServiceRoleClient() {
@@ -365,8 +415,10 @@ export async function updateProjectBriefAction(
 ): Promise<ProjectActionResult> {
   const ownerId = input.ownerId.trim() || null;
   const targetDate = input.targetDate.trim() || null;
+  const goalStatement = input.goalStatement.trim() || null;
   const successMetric = input.successMetric.trim() || null;
   const scopeSummary = input.scopeSummary.trim() || null;
+  const keyOutcomes = normalizeKeyOutcomes(input.keyOutcomes);
 
   const context = await getProjectOwnerContext(input.workspaceId, input.projectId);
 
@@ -375,6 +427,7 @@ export async function updateProjectBriefAction(
   }
 
   const { supabase, user, project } = context;
+  const currentKeyOutcomes = parseProjectKeyOutcomes(project.key_outcomes);
 
   if (ownerId) {
     const { data: ownerMembership } = await supabase
@@ -395,8 +448,10 @@ export async function updateProjectBriefAction(
   if (
     (project.owner_id ?? null) === ownerId &&
     (project.target_date ?? null) === targetDate &&
+    (project.goal_statement ?? null) === goalStatement &&
     (project.success_metric ?? null) === successMetric &&
-    (project.scope_summary ?? null) === scopeSummary
+    (project.scope_summary ?? null) === scopeSummary &&
+    areStringArraysEqual(currentKeyOutcomes, keyOutcomes)
   ) {
     return {
       status: "success",
@@ -411,8 +466,10 @@ export async function updateProjectBriefAction(
     .update({
       owner_id: ownerId,
       target_date: targetDate,
+      goal_statement: goalStatement,
       success_metric: successMetric,
       scope_summary: scopeSummary,
+      key_outcomes: keyOutcomes,
     })
     .eq("id", input.projectId)
     .eq("workspace_id", input.workspaceId)
@@ -436,12 +493,20 @@ export async function updateProjectBriefAction(
     changedFields.push("targetDate");
   }
 
+  if ((project.goal_statement ?? null) !== (updatedProject.goal_statement ?? null)) {
+    changedFields.push("goalStatement");
+  }
+
   if ((project.success_metric ?? null) !== (updatedProject.success_metric ?? null)) {
     changedFields.push("successMetric");
   }
 
   if ((project.scope_summary ?? null) !== (updatedProject.scope_summary ?? null)) {
     changedFields.push("scopeSummary");
+  }
+
+  if (!areStringArraysEqual(currentKeyOutcomes, parseProjectKeyOutcomes(updatedProject.key_outcomes))) {
+    changedFields.push("keyOutcomes");
   }
 
   await insertActivity(adminClient, {
@@ -454,6 +519,7 @@ export async function updateProjectBriefAction(
       fields: changedFields,
       ownerId: updatedProject.owner_id,
       targetDate: updatedProject.target_date,
+      goalStatement: updatedProject.goal_statement,
     },
   });
 
@@ -1035,6 +1101,86 @@ export async function addStandupAction(
   };
 }
 
+export async function addProjectStatusUpdateAction(
+  input: AddProjectStatusUpdateInput,
+): Promise<ProjectActionResult> {
+  const headline = input.headline.trim();
+  const summary = input.summary.trim();
+  const risks = input.risks.trim() || null;
+  const nextSteps = input.nextSteps.trim() || null;
+
+  if (!VALID_PROJECT_UPDATE_HEALTH.has(input.health)) {
+    return {
+      status: "error",
+      message: "Unsupported project health.",
+    };
+  }
+
+  if (!headline || !summary) {
+    return {
+      status: "error",
+      message: "Add both a headline and summary for the status update.",
+    };
+  }
+
+  const context = await getProjectOwnerContext(input.workspaceId, input.projectId);
+
+  if (context.status === "error") {
+    return context;
+  }
+
+  const { supabase, user } = context;
+  const { data: statusUpdate, error } = await supabase
+    .from("project_status_updates")
+    .insert({
+      project_id: input.projectId,
+      user_id: user.id,
+      health: input.health,
+      headline,
+      summary,
+      risks,
+      next_steps: nextSteps,
+    })
+    .select("*")
+    .single();
+
+  if (error || !statusUpdate) {
+    return {
+      status: "error",
+      message: error?.message ?? "Could not post status update.",
+    };
+  }
+
+  const healthLabel = input.health === "on_track"
+    ? "On track"
+    : input.health === "at_risk"
+      ? "At risk"
+      : "Off track";
+
+  await insertActivity(supabase, {
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    actorId: user.id,
+    action: "project.status_update_posted",
+    metadata: {
+      projectId: input.projectId,
+      statusUpdateId: statusUpdate.id,
+      health: input.health,
+      healthLabel,
+      headline,
+      summaryPreview: buildSummaryPreview(summary),
+    },
+  });
+
+  revalidateProjectPaths(input.workspaceId, input.projectId);
+
+  return {
+    status: "success",
+    message: "Status update posted.",
+    statusUpdate: statusUpdate as ProjectStatusUpdateRow,
+  };
+}
+
 export async function createProjectShareAction(
   input: CreateProjectShareInput,
 ): Promise<ProjectActionResult> {
@@ -1131,5 +1277,154 @@ export async function revokeProjectShareAction(
     status: "success",
     message: "Share link revoked.",
     shareId: share.id,
+  };
+}
+
+export async function createProjectTemplateAction(
+  input: CreateProjectTemplateInput,
+): Promise<ProjectActionResult> {
+  const nextName = input.name.trim();
+  const nextDescription = input.description.trim() || null;
+
+  if (!nextName) {
+    return {
+      status: "error",
+      message: "Template name is required.",
+    };
+  }
+
+  const context = await getProjectOwnerContext(input.workspaceId, input.projectId);
+
+  if (context.status === "error") {
+    return context;
+  }
+
+  const { supabase, user, project } = context;
+  const { data: milestoneRows, error: milestoneError } = await supabase
+    .from("milestones")
+    .select("name")
+    .eq("project_id", input.projectId)
+    .order("created_at", { ascending: true });
+
+  if (milestoneError) {
+    return {
+      status: "error",
+      message: milestoneError.message,
+    };
+  }
+
+  const { data: template, error } = await supabase
+    .from("project_templates")
+    .insert({
+      workspace_id: input.workspaceId,
+      created_by: user.id,
+      name: nextName,
+      description: nextDescription,
+      config: {
+        projectDescription: project.description ?? "",
+        goalStatement: project.goal_statement ?? "",
+        scopeSummary: project.scope_summary ?? "",
+        successMetric: project.success_metric ?? "",
+        phase: project.phase,
+        keyOutcomes: parseProjectKeyOutcomes(project.key_outcomes),
+        milestones: (milestoneRows ?? []).map((milestone) => milestone.name),
+      },
+    })
+    .select("*")
+    .single();
+
+  if (error || !template) {
+    return {
+      status: "error",
+      message: error?.code === "23505" ? "A template with that name already exists in this workspace." : error?.message ?? "Could not create template.",
+    };
+  }
+
+  await insertActivity(supabase, {
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    actorId: user.id,
+    action: "project.template_created",
+    metadata: {
+      projectId: input.projectId,
+      templateId: template.id,
+      templateName: template.name,
+    },
+  });
+
+  revalidateProjectPaths(input.workspaceId, input.projectId);
+
+  return {
+    status: "success",
+    message: "Project template saved.",
+    template: template as ProjectTemplateRow,
+  };
+}
+
+export async function deleteProjectTemplateAction(
+  input: DeleteProjectTemplateInput,
+): Promise<ProjectActionResult> {
+  const context = await getProjectOwnerContext(input.workspaceId, input.projectId);
+
+  if (context.status === "error") {
+    return context;
+  }
+
+  const { supabase, user } = context;
+  const { data: template, error: templateError } = await supabase
+    .from("project_templates")
+    .select("*")
+    .eq("id", input.templateId)
+    .eq("workspace_id", input.workspaceId)
+    .maybeSingle();
+
+  if (templateError) {
+    return {
+      status: "error",
+      message: templateError.message,
+    };
+  }
+
+  if (!template) {
+    return {
+      status: "error",
+      message: "Template not found.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("project_templates")
+    .delete()
+    .eq("id", input.templateId)
+    .eq("workspace_id", input.workspaceId);
+
+  if (error) {
+    return {
+      status: "error",
+      message: error.message,
+    };
+  }
+
+  const templateConfig = parseProjectTemplateConfig(template.config);
+
+  await insertActivity(supabase, {
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    actorId: user.id,
+    action: "project.template_deleted",
+    metadata: {
+      projectId: input.projectId,
+      templateId: template.id,
+      templateName: template.name,
+      milestoneCount: templateConfig.milestones.length,
+    },
+  });
+
+  revalidateProjectPaths(input.workspaceId, input.projectId);
+
+  return {
+    status: "success",
+    message: "Template deleted.",
+    templateId: template.id,
   };
 }

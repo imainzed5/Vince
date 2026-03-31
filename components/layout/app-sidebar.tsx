@@ -4,15 +4,18 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import { MessageCircleMore } from "lucide-react";
+import { LifeBuoy, LogOut, MessageCircleMore, Settings2 } from "lucide-react";
 
+import { logoutAction } from "@/app/(auth)/actions";
 import { NewProjectModal } from "@/components/shared/NewProjectModal";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { useRealtime } from "@/hooks/useRealtime";
 import { getUnreadChatCount } from "@/lib/collaboration";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 import type { Project } from "@/types";
 
 const workspaceNav = [
@@ -22,7 +25,7 @@ const workspaceNav = [
   { key: "activity", label: "Activity Feed", requiresWorkspace: true },
   { key: "chat", label: "Chat", requiresWorkspace: true },
   { key: "members", label: "Members", requiresWorkspace: true },
-  { key: "settings", label: "Settings", requiresWorkspace: true },
+  { key: "settings", label: "Workspace settings", requiresWorkspace: true },
 ] as const;
 
 const projectTabs = [
@@ -41,17 +44,37 @@ const projectPhaseDot: Record<string, string> = {
 };
 
 type AppSidebarProps = {
+  currentUser: {
+    id: string;
+    email: string | null;
+    displayName: string;
+  };
   workspaceId: string | null;
   projects: Project[];
 };
 
 type WorkspaceNavKey = (typeof workspaceNav)[number]["key"];
 
-export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
+function getInitials(value: string): string {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+
+  if (parts.length === 0) {
+    return "VI";
+  }
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+}
+
+export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarProps) {
   const pathname = usePathname();
   const params = useParams<{ workspaceId?: string }>();
   const routeWorkspaceId = typeof params.workspaceId === "string" ? params.workspaceId : null;
-  const resolvedWorkspaceId = routeWorkspaceId ?? workspaceId;
+  const storedWorkspaceId = useWorkspaceStore((state) => state.currentWorkspaceId);
+  const setCurrentWorkspaceId = useWorkspaceStore((state) => state.setCurrentWorkspaceId);
+  const resolvedWorkspaceId = routeWorkspaceId ?? workspaceId ?? storedWorkspaceId;
   const supabase = useMemo(() => createClient(), []);
   const workspaceRequestRef = useRef(0);
 
@@ -61,8 +84,8 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
   const [workspaceProjects, setWorkspaceProjects] = useState<Project[]>(projects);
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [workspaceChatUnreadCount, setWorkspaceChatUnreadCount] = useState(0);
+  const currentUserId = currentUser.id;
 
   const projectMatch = useMemo(() => {
     if (!resolvedWorkspaceId) {
@@ -74,18 +97,6 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
     );
     return pathname.match(regex);
   }, [pathname, resolvedWorkspaceId]);
-
-  useEffect(() => {
-    const loadCurrentUser = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      setCurrentUserId(user?.id ?? null);
-    };
-
-    void loadCurrentUser();
-  }, [supabase]);
 
   const loadWorkspaceData = useCallback(
     async (currentWorkspaceId: string) => {
@@ -123,6 +134,16 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
     },
     [supabase],
   );
+
+  useEffect(() => {
+    const nextWorkspaceId = routeWorkspaceId ?? workspaceId ?? null;
+
+    if (!nextWorkspaceId || nextWorkspaceId === storedWorkspaceId) {
+      return;
+    }
+
+    setCurrentWorkspaceId(nextWorkspaceId);
+  }, [routeWorkspaceId, setCurrentWorkspaceId, storedWorkspaceId, workspaceId]);
 
   useEffect(() => {
     if (!resolvedWorkspaceId) {
@@ -316,9 +337,9 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
   });
 
   const panelClassName =
-    "rounded-[26px] border border-white/80 bg-white/72 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.88)] supports-[backdrop-filter]:bg-white/60 supports-[backdrop-filter]:backdrop-blur-xl";
+    "rounded-[26px] border border-white/80 bg-white/72 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.88)] supports-[backdrop-filter]:bg-white/60 supports-[backdrop-filter]:backdrop-blur-xl dark:border-white/6 dark:bg-white/4 dark:shadow-[0_28px_52px_-34px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.04)] dark:supports-[backdrop-filter]:bg-black/26";
   const sectionLabelClassName =
-    "px-2 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-sidebar-foreground/38";
+    "px-2 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-sidebar-foreground/38 dark:text-sidebar-foreground/44";
 
   const getUtilityLinkClassName = (active: boolean) =>
     cn(
@@ -326,10 +347,10 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
         variant: "ghost",
         size: "sm",
         className:
-          "h-8 flex-1 rounded-full border border-white/80 bg-white/60 px-3 text-[0.78rem] font-medium text-sidebar-foreground/72 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] transition-[background-color,border-color,color,box-shadow] duration-200 hover:border-white hover:bg-white/88 hover:text-sidebar-foreground active:translate-y-0",
+          "h-8 flex-1 rounded-full border border-white/80 bg-white/60 px-3 text-[0.78rem] font-medium text-sidebar-foreground/72 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] transition-[background-color,border-color,color,box-shadow] duration-200 hover:border-white hover:bg-white/88 hover:text-sidebar-foreground active:translate-y-0 dark:border-white/6 dark:bg-white/4 dark:text-sidebar-foreground/66 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] dark:hover:border-white/10 dark:hover:bg-white/7",
       }),
       active &&
-        "border-sidebar-border/70 bg-white/92 text-sidebar-foreground shadow-[0_12px_24px_-20px_rgba(15,23,42,0.45),inset_0_1px_0_rgba(255,255,255,0.94)] hover:bg-white/92",
+        "border-sidebar-border/70 bg-white/92 text-sidebar-foreground shadow-[0_12px_24px_-20px_rgba(15,23,42,0.45),inset_0_1px_0_rgba(255,255,255,0.94)] hover:bg-white/92 dark:bg-white/8 dark:shadow-[0_20px_34px_-26px_rgba(0,0,0,0.88),inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:bg-white/8",
     );
 
   const getNavItemClassName = ({
@@ -349,8 +370,8 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
       }),
       withTrailing ? "justify-between" : "justify-start",
       active
-        ? "border-sidebar-border/70 bg-white/84 text-sidebar-foreground shadow-[0_14px_26px_-22px_rgba(15,23,42,0.5),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84"
-        : "text-sidebar-foreground/68 hover:border-white hover:bg-white/64 hover:text-sidebar-foreground",
+        ? "border-sidebar-border/70 bg-white/84 text-sidebar-foreground shadow-[0_14px_26px_-22px_rgba(15,23,42,0.5),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84 dark:bg-white/8 dark:shadow-[0_20px_36px_-28px_rgba(0,0,0,0.88),inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:bg-white/8"
+        : "text-sidebar-foreground/62 hover:border-white hover:bg-white/64 hover:text-sidebar-foreground dark:text-sidebar-foreground/66 dark:hover:border-white/10 dark:hover:bg-white/6",
       isLocked &&
         "cursor-not-allowed border-transparent bg-transparent text-sidebar-foreground/34 opacity-100 hover:border-transparent hover:bg-transparent hover:text-sidebar-foreground/34",
     );
@@ -364,12 +385,12 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
       }),
       "w-full justify-start gap-2.5 text-sidebar-foreground/68",
       active
-        ? "border-sidebar-border/70 bg-white/84 text-sidebar-foreground shadow-[0_14px_26px_-22px_rgba(15,23,42,0.5),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84"
-        : "hover:border-white hover:bg-white/64 hover:text-sidebar-foreground",
+        ? "border-sidebar-border/70 bg-white/84 text-sidebar-foreground shadow-[0_14px_26px_-22px_rgba(15,23,42,0.5),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84 dark:bg-white/8 dark:shadow-[0_20px_36px_-28px_rgba(0,0,0,0.88),inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:bg-white/8"
+        : "hover:border-white hover:bg-white/64 hover:text-sidebar-foreground dark:hover:border-white/10 dark:hover:bg-white/6",
     );
 
   return (
-    <aside className="hidden w-80 shrink-0 border-r border-sidebar-border/55 bg-sidebar/88 px-4 py-5 text-sidebar-foreground md:sticky md:top-0 md:block md:h-screen md:overflow-y-auto md:supports-[backdrop-filter]:bg-sidebar/72 md:supports-[backdrop-filter]:backdrop-blur-2xl">
+    <aside className="hidden w-80 shrink-0 border-r border-sidebar-border/55 bg-sidebar/88 px-4 py-5 text-sidebar-foreground md:sticky md:top-0 md:block md:h-screen md:overflow-y-auto md:supports-[backdrop-filter]:bg-sidebar/72 md:supports-[backdrop-filter]:backdrop-blur-2xl dark:border-sidebar-border/90 dark:bg-sidebar dark:supports-[backdrop-filter]:bg-sidebar/92">
       <div className="flex min-h-full flex-col gap-3">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-1.5">
@@ -388,8 +409,8 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
               </p>
               {isWorkspaceLoading ? (
                 <div className="space-y-2 pt-2">
-                  <div className="h-5 w-40 animate-pulse rounded-full bg-white/80" />
-                  <div className="h-4 w-28 animate-pulse rounded-full bg-white/65" />
+                  <div className="h-5 w-40 animate-pulse rounded-full bg-white/80 dark:bg-white/8" />
+                  <div className="h-4 w-28 animate-pulse rounded-full bg-white/65 dark:bg-white/6" />
                 </div>
               ) : !hasSelectedWorkspace ? (
                 <p className="pt-2 text-sm leading-6 text-sidebar-foreground/56">
@@ -407,7 +428,7 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
               )}
             </div>
             {hasSelectedWorkspace ? (
-              <span className="rounded-full border border-white/80 bg-white/78 px-2.5 py-1 text-[0.68rem] font-medium text-sidebar-foreground/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.88)]">
+              <span className="rounded-full border border-white/80 bg-white/78 px-2.5 py-1 text-[0.68rem] font-medium text-sidebar-foreground/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.88)] dark:border-white/6 dark:bg-white/6 dark:text-sidebar-foreground/52 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                 Live
               </span>
             ) : null}
@@ -415,13 +436,13 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
 
           {hasSelectedWorkspace && !isWorkspaceLoading ? (
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <div className="rounded-[20px] border border-white/75 bg-white/64 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+              <div className="rounded-[20px] border border-white/75 bg-white/64 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] dark:border-white/6 dark:bg-white/4 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                 <p className="text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/40">Members</p>
                 <p className="mt-1 text-sm font-semibold text-sidebar-foreground">
                   {(workspaceMemberCount ?? 0).toLocaleString()}
                 </p>
               </div>
-              <div className="rounded-[20px] border border-white/75 bg-white/64 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+              <div className="rounded-[20px] border border-white/75 bg-white/64 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] dark:border-white/6 dark:bg-white/4 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                 <p className="text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/40">Projects</p>
                 <p className="mt-1 text-sm font-semibold text-sidebar-foreground">
                   {(workspaceProjectCount ?? 0).toLocaleString()}
@@ -519,7 +540,7 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
               </Link>
             ))}
             {!hasSelectedWorkspace ? (
-              <p className="rounded-[20px] border border-dashed border-sidebar-border/60 bg-white/34 px-3 py-3 text-sm leading-6 text-sidebar-foreground/52">
+              <p className="rounded-[20px] border border-dashed border-sidebar-border/60 bg-white/34 px-3 py-3 text-sm leading-6 text-sidebar-foreground/52 dark:bg-white/3 dark:text-sidebar-foreground/46">
                 Pick a workspace first before opening or creating projects.
               </p>
             ) : null}
@@ -528,7 +549,7 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
           <button
             type="button"
             disabled={!resolvedWorkspaceId}
-            className="mt-2 w-full rounded-[18px] border border-dashed border-sidebar-border/65 bg-white/42 px-3.5 py-2.5 text-left text-sm font-medium text-sidebar-foreground/58 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] transition-[background-color,border-color,color,box-shadow] duration-200 enabled:cursor-pointer enabled:hover:border-white enabled:hover:bg-white/72 enabled:hover:text-sidebar-foreground"
+            className="mt-2 w-full rounded-[18px] border border-dashed border-sidebar-border/65 bg-white/42 px-3.5 py-2.5 text-left text-sm font-medium text-sidebar-foreground/58 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] transition-[background-color,border-color,color,box-shadow] duration-200 enabled:cursor-pointer enabled:hover:border-white enabled:hover:bg-white/72 enabled:hover:text-sidebar-foreground dark:bg-white/4 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] dark:enabled:hover:border-white/10 dark:enabled:hover:bg-white/7"
             onClick={() => setIsProjectModalOpen(true)}
           >
             + New project
@@ -557,6 +578,40 @@ export function AppSidebar({ workspaceId, projects }: AppSidebarProps) {
             </div>
           </div>
         ) : null}
+
+        <div className={cn(panelClassName, "p-3")}>
+          <div className="flex items-center gap-3 rounded-[22px] border border-white/75 bg-white/64 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.84)] dark:border-white/6 dark:bg-white/4 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+            <Avatar>
+              <AvatarFallback>{getInitials(currentUser.displayName)}</AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-sidebar-foreground">{currentUser.displayName}</p>
+              <p className="truncate text-xs text-sidebar-foreground/52">{currentUser.email ?? "Signed-in account"}</p>
+            </div>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Link href="/help" className={getUtilityLinkClassName(pathname === "/help")}>
+              <span className="inline-flex items-center gap-2">
+                <LifeBuoy className="size-4" />
+                Help
+              </span>
+            </Link>
+            <Link href="/settings" className={getUtilityLinkClassName(pathname === "/settings")}>
+              <span className="inline-flex items-center gap-2">
+                <Settings2 className="size-4" />
+                Account
+              </span>
+            </Link>
+            <form action={logoutAction} className="col-span-2">
+              <button type="submit" className={cn(getUtilityLinkClassName(false), "w-full") }>
+                <span className="inline-flex items-center gap-2">
+                  <LogOut className="size-4" />
+                  Sign out
+                </span>
+              </button>
+            </form>
+          </div>
+        </div>
       </div>
 
       {resolvedWorkspaceId ? (

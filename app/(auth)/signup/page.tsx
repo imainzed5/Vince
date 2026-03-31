@@ -1,14 +1,8 @@
 import Link from "next/link";
 
+import { AuthShell } from "@/components/auth/AuthShell";
+import { AuthSubmitButton } from "@/components/auth/AuthSubmitButton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -25,15 +19,20 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
   const error = resolvedSearchParams?.error ? decodeURIComponent(resolvedSearchParams.error) : null;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-12">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="text-2xl font-semibold">Create your Vince account</CardTitle>
-          <CardDescription>
-            Start a workspace for your team and invite members with one code.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+    <AuthShell
+      eyebrow="Get your team moving"
+      title="Create your Vince account"
+      description="Set up your account, then create or join a workspace with one invite code. Vince will route you into the right next step automatically."
+      highlights={["Create or join instantly", "Project boards stay lightweight", "Built for small teams"]}
+      footer={
+        <p className="text-center text-sm text-muted-foreground">
+          Already have an account? {" "}
+          <Link className="font-medium text-foreground underline underline-offset-4" href="/login">
+            Sign in
+          </Link>
+        </p>
+      }
+    >
           <form action={signupAction} className="space-y-4">
             {error ? (
               <Alert variant="destructive">
@@ -42,7 +41,14 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
             ) : null}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" autoComplete="email" required />
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@team.com"
+                required
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
@@ -52,21 +58,15 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
                 type="password"
                 autoComplete="new-password"
                 minLength={8}
+                placeholder="Use at least 8 characters"
                 required
               />
+              <p className="text-xs text-muted-foreground">
+                After sign-up, Vince either signs you in immediately or asks you to confirm your email before continuing.
+              </p>
             </div>
-            <Button className="w-full" type="submit">
-              Create account
-            </Button>
+            <AuthSubmitButton idleLabel="Create account" pendingLabel="Creating account..." />
           </form>
-          <p className="mt-4 text-center text-sm text-muted-foreground">
-            Already have an account?{" "}
-            <Link className="font-medium text-foreground underline" href="/login">
-              Sign in
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
-    </main>
+    </AuthShell>
   );
 }

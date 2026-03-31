@@ -29,9 +29,9 @@ export function NotesList({
   initialReferenceTime,
 }: NotesListProps) {
   return (
-    <aside className="w-full rounded-xl border bg-white p-3 md:w-80 md:shrink-0">
+    <aside className="surface-panel w-full rounded-xl border p-3 md:w-80 md:shrink-0">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Notes</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Notes</h2>
         <Button type="button" size="sm" onClick={onCreate} disabled={readOnly}>
           + New note
         </Button>
@@ -39,9 +39,9 @@ export function NotesList({
 
       {isLoading ? (
         <div className="space-y-2">
-          <div className="h-14 animate-pulse rounded-lg bg-slate-100" />
-          <div className="h-14 animate-pulse rounded-lg bg-slate-100" />
-          <div className="h-14 animate-pulse rounded-lg bg-slate-100" />
+          <div className="surface-subpanel h-14 animate-pulse rounded-lg border" />
+          <div className="surface-subpanel h-14 animate-pulse rounded-lg border" />
+          <div className="surface-subpanel h-14 animate-pulse rounded-lg border" />
         </div>
       ) : notes.length === 0 ? (
         <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -57,12 +57,12 @@ export function NotesList({
                 className={cn(
                   "w-full rounded-lg border px-3 py-2 text-left transition",
                   activeNoteId === note.id
-                    ? "border-blue-300 bg-blue-50"
-                    : "border-transparent hover:border-slate-200 hover:bg-slate-50",
+                    ? "border-blue-300 bg-blue-50 dark:border-blue-500/40 dark:bg-blue-500/15"
+                    : "border-transparent hover:border-border hover:bg-[var(--surface-subpanel-hover)]",
                 )}
               >
                 <div className="mb-1 flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-slate-900">{note.title || "Untitled"}</span>
+                  <span className="truncate text-sm font-medium text-foreground">{note.title || "Untitled"}</span>
                   {note.is_pinned ? <Pin className="size-3 text-amber-500" /> : null}
                 </div>
                 <p className="text-xs text-muted-foreground">

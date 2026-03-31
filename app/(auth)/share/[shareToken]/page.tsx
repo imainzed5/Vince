@@ -3,6 +3,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { ProjectSnapshotCard } from "@/components/shared/ProjectSnapshotCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getWorkspaceMemberNames } from "@/lib/supabase/member-names";
+import { getMemberDisplayName } from "@/lib/utils/displayName";
 import type { Database } from "@/types/database.types";
 
 type SharePageProps = {
@@ -36,7 +37,7 @@ export default async function SharedProjectPage({ params }: SharePageProps) {
 
   if (!share) {
     return (
-      <main className="min-h-screen bg-slate-100 p-6">
+      <main className="min-h-screen bg-background p-6 text-foreground">
         <Card className="mx-auto max-w-xl">
           <CardHeader>
             <CardTitle>Share link unavailable</CardTitle>
@@ -51,7 +52,7 @@ export default async function SharedProjectPage({ params }: SharePageProps) {
 
   if (share.expires_at && new Date(share.expires_at) < new Date()) {
     return (
-      <main className="min-h-screen bg-slate-100 p-6">
+      <main className="min-h-screen bg-background p-6 text-foreground">
         <Card className="mx-auto max-w-xl">
           <CardHeader>
             <CardTitle>Share link expired</CardTitle>
@@ -64,17 +65,18 @@ export default async function SharedProjectPage({ params }: SharePageProps) {
     );
   }
 
-  const [{ data: project }, { data: tasks }, { data: milestones }, { data: standups }, { data: activity }] = await Promise.all([
+  const [{ data: project }, { data: tasks }, { data: milestones }, { data: standups }, { data: statusUpdates }, { data: activity }] = await Promise.all([
     supabase.from("projects").select("*").eq("id", share.project_id).single(),
     supabase.from("tasks").select("*").eq("project_id", share.project_id).order("position", { ascending: true }),
     supabase.from("milestones").select("*").eq("project_id", share.project_id).order("created_at", { ascending: true }),
     supabase.from("standups").select("*").eq("project_id", share.project_id).order("created_at", { ascending: false }).limit(3),
+    supabase.from("project_status_updates").select("*").eq("project_id", share.project_id).order("created_at", { ascending: false }).limit(3),
     supabase.from("activity_log").select("*").eq("project_id", share.project_id).order("created_at", { ascending: false }).limit(8),
   ]);
 
   if (!project) {
     return (
-      <main className="min-h-screen bg-slate-100 p-6">
+      <main className="min-h-screen bg-background p-6 text-foreground">
         <Card className="mx-auto max-w-xl">
           <CardHeader>
             <CardTitle>Project unavailable</CardTitle>
@@ -87,18 +89,26 @@ export default async function SharedProjectPage({ params }: SharePageProps) {
     );
   }
 
+  const { data: taskStatuses } = await supabase
+    .from("workspace_task_statuses")
+    .select("*")
+    .eq("workspace_id", project.workspace_id)
+    .order("position", { ascending: true });
+
   const memberNames = await getWorkspaceMemberNames(project.workspace_id);
-  const ownerName = project.owner_id ? memberNames[project.owner_id] ?? `User ${project.owner_id.slice(0, 8)}` : null;
+  const ownerName = project.owner_id ? getMemberDisplayName(memberNames[project.owner_id]) : null;
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
+    <main className="min-h-screen bg-background p-6 text-foreground">
       <ProjectSnapshotCard
         activityItems={(activity ?? []) as Database["public"]["Tables"]["activity_log"]["Row"][]}
         memberNames={memberNames}
         milestones={(milestones ?? []) as Database["public"]["Tables"]["milestones"]["Row"][]}
         ownerName={ownerName}
         project={project as Database["public"]["Tables"]["projects"]["Row"]}
+        statusUpdates={(statusUpdates ?? []) as Database["public"]["Tables"]["project_status_updates"]["Row"][]}
         standups={(standups ?? []) as Database["public"]["Tables"]["standups"]["Row"][]}
+        taskStatuses={(taskStatuses ?? []) as Database["public"]["Tables"]["workspace_task_statuses"]["Row"][]}
         tasks={(tasks ?? []) as Database["public"]["Tables"]["tasks"]["Row"][]}
       />
     </main>

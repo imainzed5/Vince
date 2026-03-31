@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import OverviewClient from "./OverviewClient";
 import { getWorkspaceMemberNames } from "@/lib/supabase/member-names";
 import { createClient } from "@/lib/supabase/server";
+import { getMemberDisplayName } from "@/lib/utils/displayName";
+import type { WorkspaceTaskStatusDefinition } from "@/types";
 import type { Database } from "@/types/database.types";
 
 type OverviewPageProps = {
@@ -14,6 +16,7 @@ type OverviewPageProps = {
 
 type Project = Database["public"]["Tables"]["projects"]["Row"];
 type ProjectShare = Database["public"]["Tables"]["project_shares"]["Row"];
+type ProjectStatusUpdate = Database["public"]["Tables"]["project_status_updates"]["Row"];
 type Task = Database["public"]["Tables"]["tasks"]["Row"];
 type Milestone = Database["public"]["Tables"]["milestones"]["Row"];
 type Standup = Database["public"]["Tables"]["standups"]["Row"];
@@ -31,7 +34,7 @@ export default async function OverviewPage({ params }: OverviewPageProps) {
     redirect("/login");
   }
 
-  const [{ data: project }, { data: tasks }, { data: milestones }, { data: standups }, { data: members }, { data: projectShares }] = await Promise.all([
+  const [{ data: project }, { data: tasks }, { data: milestones }, { data: standups }, { data: statusUpdates }, { data: members }, { data: projectShares }, { data: taskStatuses }] = await Promise.all([
     supabase.from("projects").select("*").eq("id", projectId).single(),
     supabase.from("tasks").select("*").eq("project_id", projectId),
     supabase.from("milestones").select("*").eq("project_id", projectId),
@@ -41,6 +44,12 @@ export default async function OverviewPage({ params }: OverviewPageProps) {
       .eq("project_id", projectId)
       .order("created_at", { ascending: false })
       .limit(3),
+    supabase
+      .from("project_status_updates")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false })
+      .limit(5),
     supabase.from("workspace_members").select("*").eq("workspace_id", workspaceId),
     supabase
       .from("project_shares")
@@ -48,6 +57,11 @@ export default async function OverviewPage({ params }: OverviewPageProps) {
       .eq("project_id", projectId)
       .is("revoked_at", null)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("workspace_task_statuses")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .order("position", { ascending: true }),
   ]);
 
   if (!project) {
@@ -61,7 +75,7 @@ export default async function OverviewPage({ params }: OverviewPageProps) {
   const workspaceMembers = (members ?? []) as WorkspaceMembership[];
   const memberOptions: MemberOption[] = workspaceMembers.map((member) => ({
     id: member.user_id,
-    name: memberNames[member.user_id] ?? `User ${member.user_id.slice(0, 8)}`,
+    name: getMemberDisplayName(memberNames[member.user_id]),
     role: member.role,
   }));
   const membership = workspaceMembers.find((member) => member.user_id === user.id) ?? null;
@@ -75,6 +89,8 @@ export default async function OverviewPage({ params }: OverviewPageProps) {
       initialTasks={(tasks ?? []) as Task[]}
       initialMilestones={(milestones ?? []) as Milestone[]}
       initialStandups={(standups ?? []) as Standup[]}
+      initialStatusUpdates={(statusUpdates ?? []) as ProjectStatusUpdate[]}
+      initialTaskStatuses={(taskStatuses ?? []) as WorkspaceTaskStatusDefinition[]}
       currentUserRole={(membership as WorkspaceMembership | null)?.role ?? "member"}
       memberOptions={memberOptions}
       memberNames={memberNames}

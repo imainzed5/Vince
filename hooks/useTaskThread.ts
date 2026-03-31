@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 
+import { getMemberDisplayName } from "@/lib/utils/displayName";
 import { useRealtime } from "@/hooks/useRealtime";
 import type { Task } from "@/types";
 import type { Database } from "@/types/database.types";
@@ -35,7 +36,7 @@ function toCommentViewModel(
     ...comment,
     authorName:
       memberNameMap[comment.user_id] ??
-      (comment.user_id === currentUserId ? "You" : `User ${comment.user_id.slice(0, 8)}`),
+      (comment.user_id === currentUserId ? "You" : getMemberDisplayName(null)),
   };
 }
 

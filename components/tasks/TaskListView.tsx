@@ -2,12 +2,14 @@
 
 import { CalendarDays, Link2 } from "lucide-react";
 
-import { BOARD_COLUMNS, PRIORITY_CONFIG } from "@/components/board/config";
+import { PRIORITY_CONFIG } from "@/components/board/config";
 import { Badge } from "@/components/ui/badge";
+import { getTaskStatusLabel, isDoneTaskStatus } from "@/lib/task-statuses";
+import { getMemberDisplayName } from "@/lib/utils/displayName";
 import { formatCalendarDate } from "@/lib/utils/time";
 import { cn } from "@/lib/utils";
 import { getTaskDueState } from "@/lib/task-insights";
-import type { Task } from "@/types";
+import type { Task, WorkspaceTaskStatusDefinition } from "@/types";
 import type { Database } from "@/types/database.types";
 
 type Milestone = Database["public"]["Tables"]["milestones"]["Row"];
@@ -15,6 +17,7 @@ type Milestone = Database["public"]["Tables"]["milestones"]["Row"];
 type TaskListViewProps = {
   tasks: Task[];
   milestones?: Milestone[];
+  taskStatuses?: WorkspaceTaskStatusDefinition[];
   memberNameMap: Record<string, string>;
   blockedByMap?: Record<string, string[]>;
   blockingMap?: Record<string, string[]>;
@@ -24,6 +27,7 @@ type TaskListViewProps = {
 export function TaskListView({
   tasks,
   milestones = [],
+  taskStatuses = [],
   memberNameMap,
   blockedByMap = {},
   blockingMap = {},
@@ -32,12 +36,12 @@ export function TaskListView({
   const milestoneNameMap = Object.fromEntries(milestones.map((milestone) => [milestone.id, milestone.name]));
 
   if (!tasks.length) {
-    return <div className="rounded-lg border bg-white p-6 text-sm text-slate-500">No tasks match the current filters.</div>;
+    return <div className="surface-panel rounded-lg border p-6 text-sm text-muted-foreground">No tasks match the current filters.</div>;
   }
 
   return (
-    <div className="space-y-3 rounded-xl border bg-white p-4">
-      <div className="hidden grid-cols-[1.2fr_0.8fr_0.7fr_0.7fr_0.9fr_0.9fr] gap-3 px-3 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid">
+    <div className="surface-panel space-y-3 rounded-xl border p-4">
+      <div className="hidden grid-cols-[1.2fr_0.8fr_0.7fr_0.7fr_0.9fr_0.9fr] gap-3 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground lg:grid">
         <span>Task</span>
         <span>Status</span>
         <span>Priority</span>
@@ -49,8 +53,9 @@ export function TaskListView({
       <div className="space-y-2">
         {tasks.map((task) => {
           const priority = PRIORITY_CONFIG[task.priority];
-          const statusLabel = BOARD_COLUMNS.find((column) => column.status === task.status)?.label ?? task.status;
-          const dueState = getTaskDueState(task);
+          const statusLabel = getTaskStatusLabel(task.status, taskStatuses);
+          const dueState = getTaskDueState(task, undefined, taskStatuses);
+          const isDone = isDoneTaskStatus(task.status, taskStatuses);
           const blockedByCount = blockedByMap[task.id]?.length ?? 0;
           const blockingCount = blockingMap[task.id]?.length ?? 0;
 
@@ -58,7 +63,7 @@ export function TaskListView({
             <button
               key={task.id}
               type="button"
-              className="grid w-full gap-3 rounded-xl border bg-slate-50/70 p-3 text-left transition hover:border-slate-300 hover:bg-slate-50 lg:grid-cols-[1.2fr_0.8fr_0.7fr_0.7fr_0.9fr_0.9fr] lg:items-center"
+              className="surface-subpanel grid w-full gap-3 rounded-xl border p-3 text-left transition hover:border-border hover:bg-[var(--surface-subpanel-hover)] lg:grid-cols-[1.2fr_0.8fr_0.7fr_0.7fr_0.9fr_0.9fr] lg:items-center"
               onClick={() => onOpenTask(task.id)}
             >
               <div className="space-y-2">
@@ -69,14 +74,14 @@ export function TaskListView({
                   {dueState === "due-soon" ? <Badge variant="secondary">Due soon</Badge> : null}
                 </div>
                 <div>
-                  <p className={cn("text-sm font-semibold text-slate-900", task.status === "done" && "line-through opacity-70")}>{task.title}</p>
+                  <p className={cn("text-sm font-semibold text-foreground", isDone && "line-through opacity-70")}>{task.title}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {task.milestone_id ? milestoneNameMap[task.milestone_id] ?? "Milestone" : "No milestone"}
                   </p>
                 </div>
               </div>
 
-              <div className="text-sm text-slate-700">{statusLabel}</div>
+              <div className="text-sm text-foreground">{statusLabel}</div>
 
               <div>
                 <Badge variant="outline" className="gap-2">
@@ -85,24 +90,24 @@ export function TaskListView({
                 </Badge>
               </div>
 
-              <div className="text-sm text-slate-700">
-                {task.assignee_id ? memberNameMap[task.assignee_id] ?? `User ${task.assignee_id.slice(0, 8)}` : "Unassigned"}
+              <div className="text-sm text-foreground">
+                {task.assignee_id ? getMemberDisplayName(memberNameMap[task.assignee_id]) : "Unassigned"}
               </div>
 
-              <div className={cn("inline-flex items-center gap-2 text-sm", dueState === "overdue" ? "text-red-700" : dueState === "due-soon" ? "text-amber-700" : "text-slate-600")}>
+              <div className={cn("inline-flex items-center gap-2 text-sm", dueState === "overdue" ? "text-red-700 dark:text-red-300" : dueState === "due-soon" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>
                 <CalendarDays className="size-4" />
                 {formatCalendarDate(task.due_date, { fallback: "No due date", includeYear: true })}
               </div>
 
-              <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                 {blockedByCount > 0 ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 text-red-700">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 text-red-700 dark:bg-red-500/15 dark:text-red-200">
                     <Link2 className="size-3" />
                     Blocked by {blockedByCount}
                   </span>
                 ) : null}
                 {blockingCount > 0 ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-blue-700">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200">
                     <Link2 className="size-3" />
                     Blocks {blockingCount}
                   </span>

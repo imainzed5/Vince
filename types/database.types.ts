@@ -352,6 +352,91 @@ export type Database = {
           },
         ]
       }
+      project_status_updates: {
+        Row: {
+          created_at: string
+          health: string
+          headline: string
+          id: string
+          next_steps: string | null
+          project_id: string
+          risks: string | null
+          summary: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          health: string
+          headline: string
+          id?: string
+          next_steps?: string | null
+          project_id: string
+          risks?: string | null
+          summary: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          health?: string
+          headline?: string
+          id?: string
+          next_steps?: string | null
+          project_id?: string
+          risks?: string | null
+          summary?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_status_updates_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_templates: {
+        Row: {
+          config: Json
+          created_at: string | null
+          created_by: string
+          description: string | null
+          id: string
+          name: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string | null
+          created_by: string
+          description?: string | null
+          id?: string
+          name: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string | null
+          created_by?: string
+          description?: string | null
+          id?: string
+          name?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_templates_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       project_identifier_seq: {
         Row: {
           last_seq: number | null
@@ -380,7 +465,9 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           description: string | null
+          goal_statement: string | null
           id: string
+          key_outcomes: Json
           name: string
           owner_id: string | null
           phase: string
@@ -395,7 +482,9 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           description?: string | null
+          goal_statement?: string | null
           id?: string
+          key_outcomes?: Json
           name: string
           owner_id?: string | null
           phase?: string
@@ -410,7 +499,9 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           description?: string | null
+          goal_statement?: string | null
           id?: string
+          key_outcomes?: Json
           name?: string
           owner_id?: string | null
           phase?: string
@@ -430,6 +521,74 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      saved_views: {
+        Row: {
+          config: Json
+          created_at: string | null
+          id: string
+          name: string
+          project_id: string | null
+          scope: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string | null
+          id?: string
+          name: string
+          project_id?: string | null
+          scope: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string | null
+          id?: string
+          name?: string
+          project_id?: string | null
+          scope?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "saved_views_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          notification_preferences: Json
+          timezone: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          notification_preferences?: Json
+          timezone?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          notification_preferences?: Json
+          timezone?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       standups: {
         Row: {
@@ -522,21 +681,33 @@ export type Database = {
         Row: {
           content: string
           created_at: string | null
+          deleted_at: string | null
+          deleted_by: string | null
+          edited_at: string | null
           id: string
+          is_decision: boolean
           task_id: string
           user_id: string
         }
         Insert: {
           content: string
           created_at?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
+          edited_at?: string | null
           id?: string
+          is_decision?: boolean
           task_id: string
           user_id: string
         }
         Update: {
           content?: string
           created_at?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
+          edited_at?: string | null
           id?: string
+          is_decision?: boolean
           task_id?: string
           user_id?: string
         }
@@ -556,6 +727,7 @@ export type Database = {
           blocked_reason: string | null
           created_at: string | null
           created_by: string | null
+          custom_fields: Json
           description: string | null
           due_date: string | null
           id: string
@@ -574,6 +746,7 @@ export type Database = {
           blocked_reason?: string | null
           created_at?: string | null
           created_by?: string | null
+          custom_fields?: Json
           description?: string | null
           due_date?: string | null
           id?: string
@@ -592,6 +765,7 @@ export type Database = {
           blocked_reason?: string | null
           created_at?: string | null
           created_by?: string | null
+          custom_fields?: Json
           description?: string | null
           due_date?: string | null
           id?: string
@@ -618,6 +792,100 @@ export type Database = {
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workspace_task_statuses: {
+        Row: {
+          color: string
+          created_at: string
+          created_by: string | null
+          id: string
+          is_default: boolean
+          key: string
+          kind: string
+          label: string
+          position: number
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          color: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_default?: boolean
+          key: string
+          kind: string
+          label: string
+          position: number
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_default?: boolean
+          key?: string
+          kind?: string
+          label?: string
+          position?: number
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_task_statuses_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workspace_task_fields: {
+        Row: {
+          created_at: string
+          created_by: string
+          field_type: string
+          id: string
+          name: string
+          options: Json
+          position: number
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          field_type: string
+          id?: string
+          name: string
+          options?: Json
+          position: number
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          field_type?: string
+          id?: string
+          name?: string
+          options?: Json
+          position?: number
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_task_fields_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]

@@ -6,6 +6,8 @@ import { BoardView } from "@/components/board/BoardView";
 import { RealtimeRefreshBridge } from "@/components/shared/RealtimeRefreshBridge";
 import { getWorkspaceMemberNames } from "@/lib/supabase/member-names";
 import { createClient } from "@/lib/supabase/server";
+import { getMemberDisplayName } from "@/lib/utils/displayName";
+import type { TaskCustomFieldDefinition, WorkspaceTaskStatusDefinition } from "@/types";
 import type { Database } from "@/types/database.types";
 
 type BoardPageProps = {
@@ -26,7 +28,7 @@ export default async function BoardPage({ params }: BoardPageProps) {
     redirect("/login");
   }
 
-  const [{ data: project, error: projectError }, { data: members }, { data: milestones }] = await Promise.all([
+  const [{ data: project, error: projectError }, { data: members }, { data: milestones }, { data: taskFieldDefinitions }, { data: taskStatuses }] = await Promise.all([
     supabase
       .from("projects")
       .select("id, name, phase, prefix, status")
@@ -43,6 +45,16 @@ export default async function BoardPage({ params }: BoardPageProps) {
       .select("*")
       .eq("project_id", projectId)
       .order("created_at", { ascending: true }),
+    supabase
+      .from("workspace_task_fields")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .order("position", { ascending: true }),
+    supabase
+      .from("workspace_task_statuses")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .order("position", { ascending: true }),
   ]);
 
   if (projectError || !project) {
@@ -71,7 +83,7 @@ export default async function BoardPage({ params }: BoardPageProps) {
     (member) => ({
       id: member.user_id,
       role: member.role,
-      name: memberNames[member.user_id] ?? `User ${member.user_id.slice(0, 8)}`,
+      name: getMemberDisplayName(memberNames[member.user_id]),
     }),
   );
 
@@ -83,6 +95,8 @@ export default async function BoardPage({ params }: BoardPageProps) {
           { table: "projects", filter: `id=eq.${projectId}` },
           { table: "milestones", filter: `project_id=eq.${projectId}` },
           { table: "workspace_members", filter: `workspace_id=eq.${workspaceId}` },
+          { table: "workspace_task_fields", filter: `workspace_id=eq.${workspaceId}` },
+          { table: "workspace_task_statuses", filter: `workspace_id=eq.${workspaceId}` },
         ]}
       />
       <BoardView
@@ -94,6 +108,8 @@ export default async function BoardPage({ params }: BoardPageProps) {
         projectStatus={project.status}
         members={memberOptions}
         milestones={(milestones ?? []) as Database["public"]["Tables"]["milestones"]["Row"][]}
+        customFieldDefinitions={(taskFieldDefinitions ?? []) as TaskCustomFieldDefinition[]}
+        taskStatuses={(taskStatuses ?? []) as WorkspaceTaskStatusDefinition[]}
         currentUserId={user.id}
       />
     </main>

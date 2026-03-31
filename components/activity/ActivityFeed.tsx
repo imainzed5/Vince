@@ -5,12 +5,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityItem } from "@/components/activity/ActivityItem";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
-import { getDisplayNameFromEmail } from "@/lib/utils/displayName";
+import { getCurrentUserProfileSnapshot } from "@/lib/supabase/user-profiles";
+import { getDisplayNameFromEmail, getMemberDisplayName } from "@/lib/utils/displayName";
 import type { Database } from "@/types/database.types";
 
 type ActivityRow = Database["public"]["Tables"]["activity_log"]["Row"];
 
 type ActivityFeedProps = {
+  memberNames?: Record<string, string>;
   workspaceId: string;
   projectId?: string | null;
 };
@@ -22,10 +24,10 @@ function fallbackName(actorId: string | null): string {
     return "System";
   }
 
-  return `User ${actorId.slice(0, 6)}`;
+  return getMemberDisplayName(null);
 }
 
-export function ActivityFeed({ workspaceId, projectId = null }: ActivityFeedProps) {
+export function ActivityFeed({ workspaceId, projectId = null, memberNames = {} }: ActivityFeedProps) {
   const supabase = useMemo(() => createClient(), []);
   const [items, setItems] = useState<ActivityRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -68,8 +70,10 @@ export function ActivityFeed({ workspaceId, projectId = null }: ActivityFeedProp
         return;
       }
 
+      const profileSnapshot = await getCurrentUserProfileSnapshot(supabase, user);
+
       setCurrentUserId(user.id);
-      setCurrentUserName(getDisplayNameFromEmail(user.email));
+      setCurrentUserName(profileSnapshot.displayName || getDisplayNameFromEmail(user.email));
     };
 
     void loadCurrentUser();
@@ -116,12 +120,12 @@ export function ActivityFeed({ workspaceId, projectId = null }: ActivityFeedProp
 
       {isLoading ? (
         <div className="space-y-2">
-          <div className="h-14 animate-pulse rounded-lg bg-white" />
-          <div className="h-14 animate-pulse rounded-lg bg-white" />
-          <div className="h-14 animate-pulse rounded-lg bg-white" />
+          <div className="surface-panel h-14 animate-pulse rounded-lg border" />
+          <div className="surface-panel h-14 animate-pulse rounded-lg border" />
+          <div className="surface-panel h-14 animate-pulse rounded-lg border" />
         </div>
       ) : items.length === 0 ? (
-        <div className="rounded-lg border border-dashed bg-white p-4 text-sm text-muted-foreground">
+        <div className="surface-panel rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
           No activity yet.
         </div>
       ) : (
@@ -135,7 +139,9 @@ export function ActivityFeed({ workspaceId, projectId = null }: ActivityFeedProp
               actorName={
                 item.actor_id && item.actor_id === currentUserId
                   ? currentUserName
-                  : fallbackName(item.actor_id)
+                  : item.actor_id
+                    ? memberNames[item.actor_id] ?? fallbackName(item.actor_id)
+                    : fallbackName(item.actor_id)
               }
               created_at={item.created_at}
             />

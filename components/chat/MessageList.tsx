@@ -19,7 +19,7 @@ type MessageListProps = {
 export function MessageList({ messages, currentUserId }: MessageListProps) {
   if (!messages.length) {
     return (
-      <div className="flex h-full items-center justify-center rounded-lg border border-dashed bg-white p-6 text-sm text-muted-foreground">
+      <div className="surface-panel flex h-full items-center justify-center rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
         No messages yet. Say hello.
       </div>
     );

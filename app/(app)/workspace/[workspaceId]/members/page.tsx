@@ -1,10 +1,9 @@
 import { redirect } from "next/navigation";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import { MembersView, type MemberListItem } from "@/components/shared/MembersView";
 import { RealtimeRefreshBridge } from "@/components/shared/RealtimeRefreshBridge";
+import { getWorkspaceMemberNames } from "@/lib/supabase/member-names";
 import { createClient } from "@/lib/supabase/server";
-import { getDisplayNameFromEmail } from "@/lib/utils/displayName";
 import type { Database } from "@/types/database.types";
 
 type WorkspaceMembersPageProps = {
@@ -57,48 +56,17 @@ export default async function WorkspaceMembersPage({ params }: WorkspaceMembersP
   }
 
   const memberRows = (members ?? []) as Member[];
-  const userIds = Array.from(new Set(memberRows.map((member) => member.user_id)));
-
-  const emailByUserId = new Map<string, string | null>();
-  if (user.email) {
-    emailByUserId.set(user.id, user.email);
-  }
-
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (serviceRoleKey) {
-    const adminClient = createSupabaseClient<Database>(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      serviceRoleKey,
-      {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-        },
-      },
-    );
-
-    await Promise.all(
-      userIds.map(async (userId) => {
-        if (emailByUserId.has(userId)) {
-          return;
-        }
-
-        const { data } = await adminClient.auth.admin.getUserById(userId);
-        emailByUserId.set(userId, data.user?.email ?? null);
-      }),
-    );
-  }
+  const memberNames = await getWorkspaceMemberNames(workspaceId, {
+    id: user.id,
+    email: user.email ?? null,
+  });
 
   const memberItems: MemberListItem[] = memberRows.map((member) => {
-    const email = emailByUserId.get(member.user_id) ?? null;
-    const displayName = email ? getDisplayNameFromEmail(email) : `User ${member.user_id.slice(0, 8)}`;
-
     return {
       id: member.id,
       userId: member.user_id,
       role: member.role,
-      displayName,
+      displayName: memberNames[member.user_id] ?? "Unknown member",
       joinedDateLabel: toStableDateLabel(member.joined_at),
     };
   });

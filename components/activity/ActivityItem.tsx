@@ -22,7 +22,18 @@ const activityText: Record<string, (metadata: Record<string, unknown>) => string
   "task.updated": (m) => `updated task ${String(m.identifier ?? "") }`,
   "task.duplicated": (m) => `duplicated ${String(m.sourceIdentifier ?? "") } into ${String(m.identifier ?? "") }`,
   "task.deleted": (m) => `deleted task ${String(m.identifier ?? "") }`,
-  "task.comment_added": (m) => `commented on ${String(m.identifier ?? "") }`,
+  "task.comment_added": (m) =>
+    Boolean(m.isDecision)
+      ? `logged a decision on ${String(m.identifier ?? "") }`
+      : `commented on ${String(m.identifier ?? "") }`,
+  "task.comment_edited": (m) =>
+    Boolean(m.isDecision)
+      ? `updated a decision on ${String(m.identifier ?? "") }`
+      : `edited a comment on ${String(m.identifier ?? "") }`,
+  "task.comment_deleted": (m) =>
+    Boolean(m.wasDecision)
+      ? `removed a decision note from ${String(m.identifier ?? "") }`
+      : `removed a comment from ${String(m.identifier ?? "") }`,
   "task.attachment_added": (m) => `attached a file to ${String(m.identifier ?? "") }`,
   "task.dependency_added": (m) =>
     `marked ${String(m.blockedIdentifier ?? "") } as blocked by ${String(m.blockingIdentifier ?? "") }`,
@@ -46,9 +57,16 @@ const activityText: Record<string, (metadata: Record<string, unknown>) => string
   "project.prefix_updated": (m) =>
     `updated the project prefix from ${String(m.previousPrefix ?? "") } to ${String(m.nextPrefix ?? "") }`,
   "project.brief_updated": (m) => `updated the project brief (${String((m.fields as string[] | undefined)?.join(", ") ?? "details") })`,
+  "project.status_update_posted": (m) => `posted a ${String(m.healthLabel ?? "project").toLowerCase()} status update${m.headline ? `: ${String(m.headline)}` : ""}`,
   "project.share_created": () => "created a client share link",
   "project.share_revoked": () => "revoked a client share link",
+  "project.template_created": (m) => `saved ${String(m.templateName ?? "a project") } as a template`,
+  "project.template_deleted": (m) => `deleted the template ${String(m.templateName ?? "") }`,
   "workspace.updated": (m) => `updated workspace ${String(m.field ?? "settings")}`,
+  "workspace.task_field_created": (m) =>
+    `added the ${String(m.fieldName ?? "custom") } ${String(m.fieldType ?? "field")} field`,
+  "workspace.task_field_deleted": (m) =>
+    `removed the ${String(m.fieldName ?? "custom") } ${String(m.fieldType ?? "field")} field`,
   "workspace.invite_code_regenerated": () => "regenerated the workspace invite code",
   "member.joined": () => "joined the workspace",
   "member.left": () => "left the workspace",
@@ -75,16 +93,26 @@ export function ActivityItem({
 
   const textFactory = activityText[action];
   const text = textFactory ? textFactory(metadataObject) : action;
+  const detailPreview =
+    action !== "task.comment_deleted"
+    && (typeof metadataObject.commentPreview === "string"
+      ? metadataObject.commentPreview.trim()
+      : typeof metadataObject.summaryPreview === "string"
+        ? metadataObject.summaryPreview.trim()
+        : "");
 
   return (
-    <li key={id} className="flex items-start gap-3 rounded-lg border bg-white p-3">
+    <li key={id} className="surface-panel flex items-start gap-3 rounded-lg border p-3">
       <Avatar size="sm">
         <AvatarFallback>{initials(actorName)}</AvatarFallback>
       </Avatar>
-      <div className="text-sm text-slate-700">
+      <div className="text-sm text-foreground">
         <p>
-          <span className="font-semibold text-slate-900">{actorName}</span> {text}
+          <span className="font-semibold text-foreground">{actorName}</span> {text}
         </p>
+        {detailPreview ? (
+          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{detailPreview}</p>
+        ) : null}
         <p className="mt-1 text-xs text-muted-foreground">
           <RelativeTimeText value={created_at} initialReferenceTime={referenceTime} />
         </p>

@@ -31,7 +31,7 @@ export default async function WorkspaceLayout({ children, params }: WorkspaceLay
 
   return (
     <div className="min-h-screen">
-      <header className="border-b bg-white px-6 py-4">
+      <header className="surface-shell border-b px-6 py-4 supports-[backdrop-filter]:backdrop-blur-xl">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm text-muted-foreground">Workspace</p>
@@ -43,11 +43,11 @@ export default async function WorkspaceLayout({ children, params }: WorkspaceLay
                 type="search"
                 name="q"
                 placeholder="Search tasks, notes, and chat"
-                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                className="surface-subpanel h-9 w-full rounded-lg border border-border px-3 text-sm outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
               />
               <button
                 type="submit"
-                className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
+                className="surface-subpanel surface-subpanel-hover inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium transition-colors"
               >
                 Search
               </button>
@@ -55,7 +55,7 @@ export default async function WorkspaceLayout({ children, params }: WorkspaceLay
             <NotificationInbox workspaceId={workspaceId} />
             <Link
               href="/dashboard"
-              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
+              className="surface-subpanel surface-subpanel-hover inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium transition-colors"
             >
               Back to workspaces
             </Link>

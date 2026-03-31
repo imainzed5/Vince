@@ -10,7 +10,8 @@ import {
   upsertChatReadState,
 } from "@/lib/collaboration";
 import { createClient } from "@/lib/supabase/client";
-import { getDisplayNameFromEmail } from "@/lib/utils/displayName";
+import { getCurrentUserProfileSnapshot } from "@/lib/supabase/user-profiles";
+import { getDisplayNameFromEmail, getMemberDisplayName } from "@/lib/utils/displayName";
 import type { Database } from "@/types/database.types";
 
 export type ChatItem = Database["public"]["Tables"]["messages"]["Row"] & {
@@ -28,7 +29,7 @@ type UseChatOptions = {
 };
 
 function toFallbackName(userId: string): string {
-  return `User ${userId.slice(0, 6)}`;
+  return getMemberDisplayName(null);
 }
 
 export function useChat({ workspaceId, projectId = null, memberNames = {} }: UseChatOptions) {
@@ -61,8 +62,10 @@ export function useChat({ workspaceId, projectId = null, memberNames = {} }: Use
         return;
       }
 
+      const profileSnapshot = await getCurrentUserProfileSnapshot(supabase, user);
+
       setCurrentUserId(user.id);
-      setCurrentUserName(getDisplayNameFromEmail(user.email));
+      setCurrentUserName(profileSnapshot.displayName);
       const nextLastReadAt = await getChatLastReadAt(supabase, {
         workspaceId,
         projectId,
@@ -264,6 +267,9 @@ export function useChat({ workspaceId, projectId = null, memberNames = {} }: Use
         return;
       }
 
+      const profileSnapshot = await getCurrentUserProfileSnapshot(supabase, user);
+      const senderDisplayName = profileSnapshot.displayName || getDisplayNameFromEmail(user.email);
+
       const tempId = `temp-${Date.now()}`;
 
       setMessages((current) => [
@@ -275,7 +281,7 @@ export function useChat({ workspaceId, projectId = null, memberNames = {} }: Use
           user_id: user.id,
           content,
           created_at: new Date().toISOString(),
-          displayName: getDisplayNameFromEmail(user.email),
+          displayName: senderDisplayName,
           isOptimistic: true,
         },
       ]);
@@ -309,7 +315,7 @@ export function useChat({ workspaceId, projectId = null, memberNames = {} }: Use
             recipientUserId,
             actorId: user.id,
             type: "chat.mentioned",
-            title: `${getDisplayNameFromEmail(user.email)} mentioned you in ${projectId ? "project chat" : "workspace chat"}`,
+            title: `${senderDisplayName} mentioned you in ${projectId ? "project chat" : "workspace chat"}`,
             body: content,
             metadata: {
               messageId: data.id,

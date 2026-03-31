@@ -1,14 +1,8 @@
 import Link from "next/link";
 
+import { AuthShell } from "@/components/auth/AuthShell";
+import { AuthSubmitButton } from "@/components/auth/AuthSubmitButton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -29,15 +23,20 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     : null;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-12">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="text-2xl font-semibold">Sign in to Vince</CardTitle>
-          <CardDescription>
-            Continue to your workspace, projects, and team updates.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+    <AuthShell
+      eyebrow="Focused team workspace"
+      title="Sign in to Vince"
+      description="Pick up your workspace, projects, notes, and team conversations without extra onboarding steps every time you come back."
+      highlights={["Projects stay live", "Workspaces route automatically", "Chat and activity stay in sync"]}
+      footer={
+          <p className="text-center text-sm text-muted-foreground">
+            No account yet? {" "}
+            <Link className="font-medium text-foreground underline underline-offset-4" href="/signup">
+              Create one
+            </Link>
+          </p>
+      }
+    >
           <form action={loginAction} className="space-y-4">
             {error ? (
               <Alert variant="destructive">
@@ -51,30 +50,33 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             ) : null}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" autoComplete="email" required />
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@team.com"
+                required
+              />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="password">Password</Label>
+                <Link className="text-xs font-medium text-primary underline-offset-4 hover:underline" href="/forgot-password">
+                  Forgot password?
+                </Link>
+              </div>
               <Input
                 id="password"
                 name="password"
                 type="password"
                 autoComplete="current-password"
+                placeholder="Enter your password"
                 required
               />
             </div>
-            <Button className="w-full" type="submit">
-              Sign in
-            </Button>
+            <AuthSubmitButton idleLabel="Sign in" pendingLabel="Signing in..." />
           </form>
-          <p className="mt-4 text-center text-sm text-muted-foreground">
-            No account yet?{" "}
-            <Link className="font-medium text-foreground underline" href="/signup">
-              Create one
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
-    </main>
+    </AuthShell>
   );
 }

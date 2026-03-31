@@ -1,16 +1,25 @@
+import { DEFAULT_WORKSPACE_TASK_STATUSES, getTaskStatusColumns } from "@/lib/task-statuses";
 import type { TaskPriority, TaskStatus } from "@/types";
 
-export const BOARD_COLUMNS: Array<{
+export const BOARD_COLUMNS = getTaskStatusColumns(
+  DEFAULT_WORKSPACE_TASK_STATUSES.map((status, index) => ({
+    id: `default-${status.key}`,
+    workspace_id: "",
+    created_by: null,
+    key: status.key,
+    label: status.label,
+    kind: status.kind,
+    color: status.color,
+    position: status.position ?? index,
+    is_default: status.is_default,
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+  })),
+) as Array<{
   status: TaskStatus;
   label: string;
   dotColor: string;
-}> = [
-  { status: "backlog", label: "Backlog", dotColor: "bg-slate-400" },
-  { status: "todo", label: "Todo", dotColor: "bg-blue-500" },
-  { status: "in_progress", label: "In Progress", dotColor: "bg-amber-500" },
-  { status: "in_review", label: "In Review", dotColor: "bg-violet-500" },
-  { status: "done", label: "Done", dotColor: "bg-emerald-500" },
-];
+}>;
 
 export const PRIORITY_CONFIG: Record<
   TaskPriority,
@@ -24,7 +33,3 @@ export const PRIORITY_CONFIG: Record<
   medium: { color: "bg-blue-500", label: "Medium" },
   none: { color: "bg-slate-400", label: "No priority" },
 };
-
-export function isTaskStatus(value: string): value is TaskStatus {
-  return BOARD_COLUMNS.some((column) => column.status === value);
-}

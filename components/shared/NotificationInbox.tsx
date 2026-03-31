@@ -18,8 +18,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { createClient } from "@/lib/supabase/client";
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  getCurrentUserProfileSnapshot,
+} from "@/lib/supabase/user-profiles";
 import { useRealtime } from "@/hooks/useRealtime";
 import type { Database } from "@/types/database.types";
+import type { UserNotificationPreferences } from "@/types";
 
 type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
 
@@ -45,14 +50,34 @@ function getNotificationHref(notification: NotificationRow): string {
   return `/workspace/${notification.workspace_id}`;
 }
 
+function isNotificationVisible(
+  notification: NotificationRow,
+  notificationPreferences: UserNotificationPreferences,
+): boolean {
+  if (notification.type.startsWith("chat.")) {
+    return notificationPreferences.chatMentions;
+  }
+
+  if (isReminder(notification)) {
+    return notificationPreferences.taskReminders;
+  }
+
+  return true;
+}
+
 export function NotificationInbox({ workspaceId }: NotificationInboxProps) {
   const supabase = useMemo(() => createClient(), []);
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+  const [notificationPreferences, setNotificationPreferences] =
+    useState<UserNotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const unreadCount = notifications.filter((notification) => !notification.read_at).length;
+  const visibleNotifications = notifications.filter((notification) =>
+    isNotificationVisible(notification, notificationPreferences),
+  );
+  const unreadCount = visibleNotifications.filter((notification) => !notification.read_at).length;
 
   const loadNotifications = useCallback(
     async (userId: string) => {
@@ -83,7 +108,10 @@ export function NotificationInbox({ workspaceId }: NotificationInboxProps) {
         return;
       }
 
+      const profileSnapshot = await getCurrentUserProfileSnapshot(supabase, user);
+
       setCurrentUserId(user.id);
+      setNotificationPreferences(profileSnapshot.notificationPreferences);
       void loadNotifications(user.id);
     };
 
@@ -123,19 +151,32 @@ export function NotificationInbox({ workspaceId }: NotificationInboxProps) {
     }
 
     const readAt = new Date().toISOString();
-    setNotifications((current) => current.map((notification) => ({ ...notification, read_at: notification.read_at ?? readAt })));
+    const unreadVisibleIds = visibleNotifications
+      .filter((notification) => !notification.read_at)
+      .map((notification) => notification.id);
 
-    const { error } = await supabase
-      .from("notifications")
-      .update({ read_at: readAt })
-      .eq("workspace_id", workspaceId)
-      .eq("user_id", currentUserId)
-      .is("read_at", null);
+    setNotifications((current) =>
+      current.map((notification) =>
+        unreadVisibleIds.includes(notification.id)
+          ? { ...notification, read_at: notification.read_at ?? readAt }
+          : notification,
+      ),
+    );
 
-    if (error) {
+    const results = await Promise.all(
+      unreadVisibleIds.map((notificationId) =>
+        supabase
+          .from("notifications")
+          .update({ read_at: readAt })
+          .eq("id", notificationId)
+          .eq("user_id", currentUserId),
+      ),
+    );
+
+    if (results.some((result) => result.error)) {
       await loadNotifications(currentUserId);
     }
-  }, [currentUserId, loadNotifications, supabase, unreadCount, workspaceId]);
+  }, [currentUserId, loadNotifications, supabase, unreadCount, visibleNotifications]);
 
   const setupNotificationChannel = useCallback(
     (channel: RealtimeChannel) =>
@@ -200,25 +241,25 @@ export function NotificationInbox({ workspaceId }: NotificationInboxProps) {
 
         {isLoading ? (
           <div className="space-y-2">
-            <div className="h-16 animate-pulse rounded-lg bg-slate-100" />
-            <div className="h-16 animate-pulse rounded-lg bg-slate-100" />
-            <div className="h-16 animate-pulse rounded-lg bg-slate-100" />
+            <div className="h-16 animate-pulse rounded-lg bg-muted" />
+            <div className="h-16 animate-pulse rounded-lg bg-muted" />
+            <div className="h-16 animate-pulse rounded-lg bg-muted" />
           </div>
-        ) : notifications.length === 0 ? (
+        ) : visibleNotifications.length === 0 ? (
           <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
             You are all caught up.
           </div>
         ) : (
           <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
-            {notifications.map((notification) => (
+            {visibleNotifications.map((notification) => (
               <div
                 key={notification.id}
-                className={`rounded-lg border p-3 ${notification.read_at ? "bg-white" : "bg-blue-50/60"}`}
+                className={`rounded-lg border p-3 ${notification.read_at ? "surface-panel" : "border-blue-200 bg-blue-50/60 dark:border-blue-500/25 dark:bg-blue-500/12"}`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-medium text-slate-900">{notification.title}</p>
+                      <p className="text-sm font-medium text-foreground">{notification.title}</p>
                       {isReminder(notification) ? <Badge variant="outline">Reminder</Badge> : null}
                       {!notification.read_at ? <Badge variant="secondary">Unread</Badge> : null}
                     </div>

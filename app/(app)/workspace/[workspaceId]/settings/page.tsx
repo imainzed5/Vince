@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { RealtimeRefreshBridge } from "@/components/shared/RealtimeRefreshBridge";
 import { WorkspaceSettingsView } from "@/components/shared/WorkspaceSettingsView";
+import type { TaskCustomFieldDefinition, WorkspaceTaskStatusDefinition } from "@/types";
 import { createClient } from "@/lib/supabase/server";
 
 type WorkspaceSettingsPageProps = {
@@ -21,7 +22,7 @@ export default async function WorkspaceSettingsPage({ params }: WorkspaceSetting
     redirect("/login");
   }
 
-  const [{ data: workspace }, { data: membership }] = await Promise.all([
+  const [{ data: workspace }, { data: membership }, { data: taskFields }, { data: taskStatuses }] = await Promise.all([
     supabase
       .from("workspaces")
       .select("id, name, invite_code, created_at")
@@ -33,6 +34,16 @@ export default async function WorkspaceSettingsPage({ params }: WorkspaceSetting
       .eq("workspace_id", workspaceId)
       .eq("user_id", user.id)
       .maybeSingle(),
+    supabase
+      .from("workspace_task_fields")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .order("position", { ascending: true }),
+    supabase
+      .from("workspace_task_statuses")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .order("position", { ascending: true }),
   ]);
 
   if (!workspace || !membership) {
@@ -46,6 +57,8 @@ export default async function WorkspaceSettingsPage({ params }: WorkspaceSetting
         subscriptions={[
           { table: "workspaces", filter: `id=eq.${workspaceId}` },
           { table: "workspace_members", filter: `workspace_id=eq.${workspaceId}` },
+          { table: "workspace_task_fields", filter: `workspace_id=eq.${workspaceId}` },
+          { table: "workspace_task_statuses", filter: `workspace_id=eq.${workspaceId}` },
         ]}
       />
       <WorkspaceSettingsView
@@ -54,6 +67,8 @@ export default async function WorkspaceSettingsPage({ params }: WorkspaceSetting
         initialInviteCode={workspace.invite_code}
         createdAt={workspace.created_at}
         currentUserRole={membership.role}
+        initialTaskFields={(taskFields ?? []) as TaskCustomFieldDefinition[]}
+        initialTaskStatuses={(taskStatuses ?? []) as WorkspaceTaskStatusDefinition[]}
       />
     </>
   );

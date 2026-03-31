@@ -45,13 +45,13 @@ export function MessageInput({
   };
 
   return (
-    <div className="sticky bottom-0 rounded-lg border bg-white p-3">
+    <div className="surface-panel sticky bottom-0 rounded-lg border p-3">
       <div className="flex items-end gap-2">
         <textarea
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={onKeyDown}
-          className="min-h-[40px] max-h-32 flex-1 resize-none rounded-md border border-slate-200 p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+          className="surface-subpanel min-h-[40px] max-h-32 flex-1 resize-none rounded-md border border-border p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
           rows={1}
           placeholder={placeholder}
           disabled={disabled}

@@ -117,7 +117,7 @@ export function MembersView({
 
   return (
     <main className="space-y-4 p-6">
-      <section className="rounded-xl border bg-white p-4">
+      <section className="surface-panel rounded-xl border p-4">
         <p className="text-sm text-muted-foreground">Invite code</p>
         <div className="mt-2 flex items-center gap-3">
           <p className="text-2xl font-semibold tracking-wide">{inviteCode}</p>
@@ -127,7 +127,7 @@ export function MembersView({
         </div>
       </section>
 
-      <section className="rounded-xl border bg-white p-4">
+      <section className="surface-panel rounded-xl border p-4">
         <h1 className="mb-3 text-xl font-semibold">Members</h1>
 
         {isOwner ? (
@@ -155,19 +155,19 @@ export function MembersView({
               const isDemoting = pendingActionKey === `${member.userId}:member`;
 
               return (
-                <li key={member.id} className="flex items-center justify-between rounded-lg border p-3">
+                <li key={member.id} className="surface-subpanel flex items-center justify-between rounded-lg border p-3">
                   <div className="flex items-center gap-3">
                     <Avatar size="sm">
                       <AvatarFallback>{initials(displayName)}</AvatarFallback>
                     </Avatar>
                     <div>
-                      <p className="text-sm font-medium text-slate-900">{displayName}</p>
+                      <p className="text-sm font-medium text-foreground">{displayName}</p>
                       <p className="text-xs text-muted-foreground">Joined {member.joinedDateLabel}</p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium">
+                    <span className="surface-subpanel rounded-full border px-2 py-1 text-xs font-medium text-foreground">
                       {memberIsOwner ? "Owner" : "Member"}
                     </span>
                     {isOwner ? (

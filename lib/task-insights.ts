@@ -1,3 +1,4 @@
+import { isDoneTaskStatus, type WorkspaceTaskStatusDefinition } from "@/lib/task-statuses";
 import type { Task, TaskDependency } from "@/types";
 
 export type TaskDueState = "none" | "due-soon" | "overdue";
@@ -6,8 +7,12 @@ function startOfDay(reference: Date) {
   return new Date(reference.getFullYear(), reference.getMonth(), reference.getDate());
 }
 
-export function getTaskDueState(task: Pick<Task, "due_date" | "status">, reference = new Date()): TaskDueState {
-  if (!task.due_date || task.status === "done") {
+export function getTaskDueState(
+  task: Pick<Task, "due_date" | "status">,
+  reference = new Date(),
+  statusDefinitions: WorkspaceTaskStatusDefinition[] = [],
+): TaskDueState {
+  if (!task.due_date || isDoneTaskStatus(task.status, statusDefinitions)) {
     return "none";
   }
 

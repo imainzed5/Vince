@@ -44,7 +44,7 @@ export function ChatView({
       ) : null}
 
       {errorMessage ? (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{errorMessage}</div>
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-200">{errorMessage}</div>
       ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -63,12 +63,12 @@ export function ChatView({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto rounded-xl border bg-slate-50 p-3">
+      <div className="surface-panel flex-1 overflow-y-auto rounded-xl border p-3">
         {isLoading ? (
           <div className="space-y-2">
-            <div className="h-12 animate-pulse rounded bg-white" />
-            <div className="h-12 animate-pulse rounded bg-white" />
-            <div className="h-12 animate-pulse rounded bg-white" />
+            <div className="surface-subpanel h-12 animate-pulse rounded border" />
+            <div className="surface-subpanel h-12 animate-pulse rounded border" />
+            <div className="surface-subpanel h-12 animate-pulse rounded border" />
           </div>
         ) : (
           <MessageList messages={messages} currentUserId={currentUserId} />

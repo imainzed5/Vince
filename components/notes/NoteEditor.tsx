@@ -118,14 +118,14 @@ export function NoteEditor({
 
   if (!note) {
     return (
-      <section className="flex min-h-[560px] flex-1 items-center justify-center rounded-xl border bg-white p-6 text-sm text-muted-foreground">
+      <section className="surface-panel flex min-h-[560px] flex-1 items-center justify-center rounded-xl border p-6 text-sm text-muted-foreground">
         Select a note or create a new one.
       </section>
     );
   }
 
   return (
-    <section className="min-h-[560px] flex-1 rounded-xl border bg-white p-4">
+    <section className="surface-panel min-h-[560px] flex-1 rounded-xl border p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <Input
           value={title}
@@ -158,7 +158,7 @@ export function NoteEditor({
       </div>
 
       {conflictMessage ? (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200">
           <p>{conflictMessage}</p>
           {onReloadRemote ? (
             <Button type="button" size="sm" variant="outline" onClick={onReloadRemote}>
@@ -171,15 +171,15 @@ export function NoteEditor({
       <textarea
         value={content}
         onChange={(event) => setContent(event.target.value)}
-        className="h-[320px] w-full resize-none rounded-lg border border-slate-200 p-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+        className="surface-subpanel h-[320px] w-full resize-none rounded-lg border border-border p-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
         placeholder="Write your note in markdown..."
         disabled={readOnly}
       />
 
-      <div className="mt-3 rounded-lg border bg-slate-50 p-3">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Preview</p>
+      <div className="surface-subpanel mt-3 rounded-lg border p-3">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preview</p>
         <article
-          className={cn("prose prose-sm max-w-none break-words text-slate-700")}
+          className={cn("prose prose-sm max-w-none break-words text-foreground dark:prose-invert")}
           dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
         />
       </div>

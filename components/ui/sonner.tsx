@@ -132,29 +132,29 @@ function getToastStyles(variant: ToastVariant) {
   switch (variant) {
     case "success":
       return {
-        containerClassName: "border-emerald-200 bg-emerald-50 text-emerald-900",
-        icon: <CircleCheckIcon className="size-4 text-emerald-600" />,
+        containerClassName: "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-500/35 dark:bg-emerald-500/12 dark:text-emerald-100",
+        icon: <CircleCheckIcon className="size-4 text-emerald-600 dark:text-emerald-300" />,
       };
     case "error":
       return {
-        containerClassName: "border-red-200 bg-red-50 text-red-900",
-        icon: <OctagonXIcon className="size-4 text-red-600" />,
+        containerClassName: "border-red-200 bg-red-50 text-red-900 dark:border-red-500/35 dark:bg-red-500/12 dark:text-red-100",
+        icon: <OctagonXIcon className="size-4 text-red-600 dark:text-red-300" />,
       };
     case "warning":
       return {
-        containerClassName: "border-amber-200 bg-amber-50 text-amber-900",
-        icon: <TriangleAlertIcon className="size-4 text-amber-600" />,
+        containerClassName: "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/35 dark:bg-amber-500/12 dark:text-amber-100",
+        icon: <TriangleAlertIcon className="size-4 text-amber-600 dark:text-amber-300" />,
       };
     case "loading":
       return {
-        containerClassName: "border-slate-200 bg-white text-slate-900",
-        icon: <Loader2Icon className="size-4 animate-spin text-slate-600" />,
+        containerClassName: "border-border bg-[var(--surface-panel)] text-card-foreground",
+        icon: <Loader2Icon className="size-4 animate-spin text-muted-foreground" />,
       };
     case "info":
     default:
       return {
-        containerClassName: "border-slate-200 bg-white text-slate-900",
-        icon: <InfoIcon className="size-4 text-slate-600" />,
+        containerClassName: "border-border bg-[var(--surface-panel)] text-card-foreground",
+        icon: <InfoIcon className="size-4 text-muted-foreground" />,
       };
   }
 }

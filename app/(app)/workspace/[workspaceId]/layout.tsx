@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ArrowLeft, Search } from "lucide-react";
 
 import { NotificationInbox } from "@/components/shared/NotificationInbox";
 import { createClient } from "@/lib/supabase/server";
@@ -47,9 +48,11 @@ export default async function WorkspaceLayout({ children, params }: WorkspaceLay
               />
               <button
                 type="submit"
-                className="surface-subpanel surface-subpanel-hover inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium transition-colors"
+                aria-label="Search workspace"
+                className="surface-subpanel surface-subpanel-hover inline-flex size-9 items-center justify-center rounded-lg border border-border text-sm font-medium transition-colors"
               >
-                Search
+                <Search className="size-4" />
+                <span className="sr-only">Search workspace</span>
               </button>
             </form>
             <NotificationInbox workspaceId={workspaceId} />
@@ -57,7 +60,8 @@ export default async function WorkspaceLayout({ children, params }: WorkspaceLay
               href="/dashboard"
               className="surface-subpanel surface-subpanel-hover inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium transition-colors"
             >
-              Back to workspaces
+              <ArrowLeft className="mr-2 size-4" />
+              Workspaces
             </Link>
           </div>
         </div>

@@ -27,6 +27,18 @@ type EnsureUserProfileInput = {
   displayName?: string | null;
 };
 
+function getDisplayNameFromUserMetadata(user: Pick<User, "user_metadata">): string | null {
+  const metadata = user.user_metadata;
+
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const displayName = metadata.display_name;
+
+  return typeof displayName === "string" ? displayName : null;
+}
+
 function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
 }
@@ -131,7 +143,7 @@ export async function ensureUserProfile(
 
 export async function getCurrentUserProfileSnapshot(
   supabase: TypedSupabaseClient,
-  user: Pick<User, "id" | "email">,
+  user: Pick<User, "id" | "email" | "user_metadata">,
 ): Promise<{
   profile: UserProfile | null;
   displayName: string;
@@ -142,6 +154,7 @@ export async function getCurrentUserProfileSnapshot(
   const profile = await ensureUserProfile(supabase, {
     userId: user.id,
     email: user.email ?? null,
+    displayName: getDisplayNameFromUserMetadata(user),
   });
 
   return {

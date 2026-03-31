@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
+import { ensureUserProfile } from "@/lib/supabase/user-profiles";
 import { getUserWorkspaceRoute } from "@/lib/workspace";
 
 function encodeMessage(message: string) {
@@ -29,8 +30,17 @@ export async function loginAction(formData: FormData) {
 }
 
 export async function signupAction(formData: FormData) {
+  const displayName = String(formData.get("displayName") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+
+  if (!displayName) {
+    return redirect(`/signup?error=${encodeMessage("Display name is required.")}`);
+  }
+
+  if (displayName.length > 60) {
+    return redirect(`/signup?error=${encodeMessage("Display name must be 60 characters or fewer.")}`);
+  }
 
   const requestHeaders = await headers();
   const origin = requestHeaders.get("origin") ?? process.env.NEXT_PUBLIC_APP_URL;
@@ -40,6 +50,9 @@ export async function signupAction(formData: FormData) {
     email,
     password,
     options: {
+      data: {
+        display_name: displayName,
+      },
       emailRedirectTo: origin ? `${origin}/` : undefined,
     },
   });
@@ -53,6 +66,12 @@ export async function signupAction(formData: FormData) {
       `/login?message=${encodeMessage("Account created. Check your email to confirm your account.")}`,
     );
   }
+
+  await ensureUserProfile(supabase, {
+    userId: data.user.id,
+    email: data.user.email ?? null,
+    displayName,
+  });
 
   const destination = await getUserWorkspaceRoute(supabase, data.user.id);
   return redirect(destination.path);

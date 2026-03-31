@@ -26,42 +26,53 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     <AuthShell
       eyebrow="Focused team workspace"
       title="Sign in to Vince"
-      description="Pick up your workspace, projects, notes, and team conversations without extra onboarding steps every time you come back."
-      highlights={["Projects stay live", "Workspaces route automatically", "Chat and activity stay in sync"]}
+      formTitle="Sign in to Vince"
+      heroTitle={
+        <>
+          <span className="block">Welcome</span>
+          <span className="block text-white/68">back.</span>
+        </>
+      }
+      heroDescription="Pick up your workspace, projects, notes, and team conversations right where you left off."
+      description="No extra onboarding steps. Just back to your team."
+      highlights={["Projects stay live", "Workspaces auto-route", "Chat stays in sync"]}
       footer={
-          <p className="text-center text-sm text-muted-foreground">
+          <p className="text-center text-sm text-slate-500">
             No account yet? {" "}
-            <Link className="font-medium text-foreground underline underline-offset-4" href="/signup">
+            <Link className="font-medium text-primary underline-offset-4 hover:underline" href="/signup">
               Create one
             </Link>
           </p>
       }
+      infoEyebrow="What opens after sign-in"
+      infoDescription="Vince routes you back automatically: your current workspace, your workspace list, or the create-or-join screen if you are brand new."
     >
-          <form action={loginAction} className="space-y-4">
+          <form action={loginAction} className="space-y-5">
             {error ? (
-              <Alert variant="destructive">
+              <Alert variant="destructive" className="rounded-[16px] border border-red-200/85 bg-white/72 px-4 py-3 text-red-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.88),0_8px_20px_-18px_rgba(15,23,42,0.25)]">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
             {message ? (
-              <Alert>
+              <Alert className="rounded-[16px] border border-slate-200/85 bg-white/72 px-4 py-3 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.88),0_8px_20px_-18px_rgba(15,23,42,0.25)]">
                 <AlertDescription>{message}</AlertDescription>
               </Alert>
             ) : null}
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email" className="text-sm font-medium text-slate-700">Email</Label>
               <Input
                 id="email"
                 name="email"
                 type="email"
                 autoComplete="email"
                 placeholder="you@team.com"
+                className="h-12 rounded-[15px] border border-white/80 bg-white/72 px-4 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.88),0_1px_2px_rgba(15,23,42,0.04)] placeholder:text-slate-400 focus-visible:border-blue-400/70 focus-visible:ring-blue-200/80"
                 required
               />
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password" className="text-sm font-medium text-slate-700">Password</Label>
                 <Link className="text-xs font-medium text-primary underline-offset-4 hover:underline" href="/forgot-password">
                   Forgot password?
                 </Link>
@@ -72,6 +83,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 type="password"
                 autoComplete="current-password"
                 placeholder="Enter your password"
+                className="h-12 rounded-[15px] border border-white/80 bg-white/72 px-4 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.88),0_1px_2px_rgba(15,23,42,0.04)] placeholder:text-slate-400 focus-visible:border-blue-400/70 focus-visible:ring-blue-200/80"
                 required
               />
             </div>

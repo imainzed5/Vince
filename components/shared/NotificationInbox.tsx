@@ -15,8 +15,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createClient } from "@/lib/supabase/client";
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
@@ -31,6 +31,8 @@ type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
 type NotificationInboxProps = {
   workspaceId: string;
 };
+
+const NOTIFICATION_PREVIEW_LIMIT = 5;
 
 function isReminder(notification: NotificationRow): boolean {
   return notification.type.startsWith("task.due") || notification.type === "task.overdue" || notification.type === "task.blocked_stale";
@@ -67,7 +69,8 @@ function isNotificationVisible(
 
 export function NotificationInbox({ workspaceId }: NotificationInboxProps) {
   const supabase = useMemo(() => createClient(), []);
-  const [open, setOpen] = useState(false);
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [notificationPreferences, setNotificationPreferences] =
     useState<UserNotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
@@ -77,6 +80,8 @@ export function NotificationInbox({ workspaceId }: NotificationInboxProps) {
   const visibleNotifications = notifications.filter((notification) =>
     isNotificationVisible(notification, notificationPreferences),
   );
+  const previewNotifications = visibleNotifications.slice(0, NOTIFICATION_PREVIEW_LIMIT);
+  const hasOverflow = visibleNotifications.length > NOTIFICATION_PREVIEW_LIMIT;
   const unreadCount = visibleNotifications.filter((notification) => !notification.read_at).length;
 
   const loadNotifications = useCallback(
@@ -222,17 +227,114 @@ export function NotificationInbox({ workspaceId }: NotificationInboxProps) {
     setup: setupNotificationChannel,
   });
 
+  const handleNotificationNavigate = useCallback(
+    (notification: NotificationRow) => {
+      setPopoverOpen(false);
+
+      if (!notification.read_at) {
+        void markRead(notification.id);
+      }
+    },
+    [markRead],
+  );
+
+  const openNotificationCenter = useCallback(() => {
+    setPopoverOpen(false);
+    setDialogOpen(true);
+  }, []);
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          <Button type="button" variant="outline" className="gap-2" />
-        }
-      >
-        <Bell className="size-4" />
-        Notifications
-        {unreadCount > 0 ? <Badge>{unreadCount}</Badge> : null}
-      </DialogTrigger>
+    <>
+      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <PopoverTrigger
+          render={<Button type="button" variant="outline" size="icon-lg" className="relative" aria-label="Open notifications" />}
+        >
+          <Bell className="size-4" />
+          <span className="sr-only">Open notifications</span>
+          {unreadCount > 0 ? (
+            <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[11px] font-semibold text-primary-foreground">
+              {unreadCount > 9 ? "9+" : unreadCount}
+            </span>
+          ) : null}
+        </PopoverTrigger>
+        <PopoverContent align="end" side="bottom" sideOffset={10} className="w-[min(24rem,calc(100vw-1rem))] rounded-2xl border border-border bg-background p-0 text-foreground shadow-2xl">
+          <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold">Notifications</p>
+              <p className="text-xs text-muted-foreground">Task updates, mentions, and reminders.</p>
+            </div>
+            <Button type="button" variant="ghost" size="sm" onClick={() => void markAllRead()} disabled={unreadCount === 0}>
+              <CheckCheck className="size-4" />
+              Mark all read
+            </Button>
+          </div>
+
+          {isLoading ? (
+            <div className="space-y-2 p-4">
+              <div className="h-16 animate-pulse rounded-lg bg-muted" />
+              <div className="h-16 animate-pulse rounded-lg bg-muted" />
+              <div className="h-16 animate-pulse rounded-lg bg-muted" />
+            </div>
+          ) : previewNotifications.length === 0 ? (
+            <div className="p-4">
+              <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                You are all caught up.
+              </div>
+            </div>
+          ) : (
+            <div className="max-h-[26rem] space-y-2 overflow-y-auto p-4">
+              {previewNotifications.map((notification) => (
+                <div
+                  key={notification.id}
+                  className={`rounded-xl border p-3 ${notification.read_at ? "surface-panel" : "border-blue-200 bg-blue-50/60 dark:border-blue-500/25 dark:bg-blue-500/12"}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-medium text-foreground">{notification.title}</p>
+                        {isReminder(notification) ? <Badge variant="outline">Reminder</Badge> : null}
+                        {!notification.read_at ? <Badge variant="secondary">Unread</Badge> : null}
+                      </div>
+                      {notification.body ? (
+                        <p className="line-clamp-2 text-sm text-muted-foreground">{notification.body}</p>
+                      ) : null}
+                      <RelativeTimeText value={notification.created_at} className="text-xs text-muted-foreground" />
+                    </div>
+                    {!notification.read_at ? (
+                      <Button type="button" variant="ghost" size="sm" onClick={() => void markRead(notification.id)}>
+                        Mark read
+                      </Button>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-3">
+                    <Link
+                      href={getNotificationHref(notification)}
+                      className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                      onClick={() => handleNotificationNavigate(notification)}
+                    >
+                      Open related view
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+            <div className="text-xs text-muted-foreground">
+              {unreadCount > 0 ? `${unreadCount} unread` : "No unread notifications"}
+            </div>
+            {hasOverflow ? (
+              <Button type="button" variant="outline" size="sm" onClick={openNotificationCenter}>
+                View all
+              </Button>
+            ) : null}
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>Notifications</DialogTitle>
@@ -276,7 +378,17 @@ export function NotificationInbox({ workspaceId }: NotificationInboxProps) {
                 </div>
 
                 <div className="mt-3">
-                  <Link href={getNotificationHref(notification)} className="text-sm font-medium text-primary underline-offset-4 hover:underline">
+                  <Link
+                    href={getNotificationHref(notification)}
+                    className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                    onClick={() => {
+                      setDialogOpen(false);
+
+                      if (!notification.read_at) {
+                        void markRead(notification.id);
+                      }
+                    }}
+                  >
                     Open related view
                   </Link>
                 </div>
@@ -295,6 +407,7 @@ export function NotificationInbox({ workspaceId }: NotificationInboxProps) {
           </Button>
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+    </>
   );
 }

@@ -93,7 +93,7 @@ export function ResetPasswordForm() {
 
   if (!isReady) {
     return (
-      <Alert variant="destructive">
+      <Alert variant="destructive" className="rounded-[16px] border border-red-200/85 bg-white/72 px-4 py-3 text-red-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.88),0_8px_20px_-18px_rgba(15,23,42,0.25)]">
         <AlertDescription>
           This recovery link is missing or has expired. Request a new password reset from the sign-in page.
         </AlertDescription>
@@ -102,14 +102,14 @@ export function ResetPasswordForm() {
   }
 
   return (
-    <form className="space-y-4" onSubmit={handleSubmit}>
+    <form className="space-y-5" onSubmit={handleSubmit}>
       {errorMessage ? (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="rounded-[16px] border border-red-200/85 bg-white/72 px-4 py-3 text-red-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.88),0_8px_20px_-18px_rgba(15,23,42,0.25)]">
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       ) : null}
       <div className="space-y-2">
-        <Label htmlFor="reset-password">New password</Label>
+        <Label htmlFor="reset-password" className="text-sm font-medium text-slate-700">New password</Label>
         <Input
           id="reset-password"
           name="password"
@@ -117,13 +117,14 @@ export function ResetPasswordForm() {
           autoComplete="new-password"
           minLength={8}
           placeholder="At least 8 characters"
+          className="h-12 rounded-[15px] border border-white/80 bg-white/72 px-4 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.88),0_1px_2px_rgba(15,23,42,0.04)] placeholder:text-slate-400 focus-visible:border-blue-400/70 focus-visible:ring-blue-200/80"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           required
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="reset-confirm-password">Confirm new password</Label>
+        <Label htmlFor="reset-confirm-password" className="text-sm font-medium text-slate-700">Confirm new password</Label>
         <Input
           id="reset-confirm-password"
           name="confirmPassword"
@@ -131,12 +132,13 @@ export function ResetPasswordForm() {
           autoComplete="new-password"
           minLength={8}
           placeholder="Repeat your new password"
+          className="h-12 rounded-[15px] border border-white/80 bg-white/72 px-4 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.88),0_1px_2px_rgba(15,23,42,0.04)] placeholder:text-slate-400 focus-visible:border-blue-400/70 focus-visible:ring-blue-200/80"
           value={confirmPassword}
           onChange={(event) => setConfirmPassword(event.target.value)}
           required
         />
       </div>
-      <Button className="h-11 w-full rounded-xl" type="submit" disabled={isSubmitting}>
+      <Button className="h-12 w-full rounded-[15px] border border-blue-500/55 bg-[linear-gradient(180deg,#5c9bff_0%,#3b82f6_14%,#2563eb_100%)] text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.38),0_18px_30px_-18px_rgba(37,99,235,0.88)] transition-transform hover:brightness-[1.03] active:translate-y-[1px] disabled:border-blue-300/40 disabled:shadow-none" type="submit" disabled={isSubmitting}>
         {isSubmitting ? "Updating password..." : "Set new password"}
       </Button>
     </form>

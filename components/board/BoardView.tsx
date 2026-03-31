@@ -902,26 +902,33 @@ export function BoardView({
           onDragCancel={handleDragCancel}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-4 overflow-x-auto pb-2">
-            {taskStatusColumns.map((column) => (
-              <BoardColumn
-                key={column.status}
-                label={column.label}
-                status={column.status as TaskStatus}
-                color={column.dotColor}
-                tasks={taskGroups[column.status] ?? []}
-                taskStatuses={taskStatusDefinitions}
-                blockedByMap={blockedByMap}
-                blockingMap={blockingMap}
-                onAddTask={openCreateTask}
-                addDisabled={isReadOnly}
-                onOpenTask={openTaskPanel}
-                isDragDisabled={hasActiveFilters || isReadOnly}
-                activeTaskId={activeTaskId}
-                highlightedTaskId={highlightedTaskId}
-                enteringTaskIds={enteringTaskIdSet}
-              />
-            ))}
+          <div className="overflow-x-auto pb-2">
+            <div
+              className="grid min-w-full gap-4"
+              style={{
+                gridTemplateColumns: `repeat(${taskStatusColumns.length}, minmax(220px, 1fr))`,
+              }}
+            >
+              {taskStatusColumns.map((column) => (
+                <BoardColumn
+                  key={column.status}
+                  label={column.label}
+                  status={column.status as TaskStatus}
+                  color={column.dotColor}
+                  tasks={taskGroups[column.status] ?? []}
+                  taskStatuses={taskStatusDefinitions}
+                  blockedByMap={blockedByMap}
+                  blockingMap={blockingMap}
+                  onAddTask={openCreateTask}
+                  addDisabled={isReadOnly}
+                  onOpenTask={openTaskPanel}
+                  isDragDisabled={hasActiveFilters || isReadOnly}
+                  activeTaskId={activeTaskId}
+                  highlightedTaskId={highlightedTaskId}
+                  enteringTaskIds={enteringTaskIdSet}
+                />
+              ))}
+            </div>
           </div>
           <DragOverlay
             dropAnimation={{
@@ -930,7 +937,7 @@ export function BoardView({
             }}
           >
             {activeTask ? (
-              <div className="w-[300px] max-w-[300px]">
+              <div className="w-[clamp(220px,18vw,300px)] max-w-[300px]">
                 <TaskCard
                   task={activeTask}
                   taskStatuses={taskStatusDefinitions}

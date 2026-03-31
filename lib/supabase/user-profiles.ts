@@ -2,13 +2,21 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 import { getDisplayName, getDisplayNameFromEmail } from "@/lib/utils/displayName";
 import type { Database, Json } from "@/types/database.types";
-import type { UserNotificationPreferences, UserProfile } from "@/types";
+import type { UserNotificationPreferences, UserProfile, UserSidebarPreferences } from "@/types";
 
 export const DEFAULT_USER_TIMEZONE = "UTC";
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: UserNotificationPreferences = {
   chatMentions: true,
   taskReminders: true,
+};
+
+export const DEFAULT_SIDEBAR_PREFERENCES: UserSidebarPreferences = {
+  pinnedWorkspaceIds: [],
+  recentWorkspaceIds: [],
+  pinnedProjectIdsByWorkspace: {},
+  recentProjectIdsByWorkspace: {},
+  hasSeenCompactRailOnboarding: false,
 };
 
 type TypedSupabaseClient = SupabaseClient<Database>;
@@ -21,6 +29,18 @@ type EnsureUserProfileInput = {
 
 function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isStringArrayRecord(value: unknown): value is Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value).every(isStringArray);
 }
 
 export function normalizeNotificationPreferences(
@@ -37,6 +57,32 @@ export function normalizeNotificationPreferences(
     taskReminders: isBoolean(value.taskReminders)
       ? value.taskReminders
       : DEFAULT_NOTIFICATION_PREFERENCES.taskReminders,
+  };
+}
+
+export function normalizeSidebarPreferences(
+  value: Json | null | undefined,
+): UserSidebarPreferences {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_SIDEBAR_PREFERENCES;
+  }
+
+  return {
+    pinnedWorkspaceIds: isStringArray(value.pinnedWorkspaceIds)
+      ? value.pinnedWorkspaceIds
+      : DEFAULT_SIDEBAR_PREFERENCES.pinnedWorkspaceIds,
+    recentWorkspaceIds: isStringArray(value.recentWorkspaceIds)
+      ? value.recentWorkspaceIds
+      : DEFAULT_SIDEBAR_PREFERENCES.recentWorkspaceIds,
+    pinnedProjectIdsByWorkspace: isStringArrayRecord(value.pinnedProjectIdsByWorkspace)
+      ? value.pinnedProjectIdsByWorkspace
+      : DEFAULT_SIDEBAR_PREFERENCES.pinnedProjectIdsByWorkspace,
+    recentProjectIdsByWorkspace: isStringArrayRecord(value.recentProjectIdsByWorkspace)
+      ? value.recentProjectIdsByWorkspace
+      : DEFAULT_SIDEBAR_PREFERENCES.recentProjectIdsByWorkspace,
+    hasSeenCompactRailOnboarding: isBoolean(value.hasSeenCompactRailOnboarding)
+      ? value.hasSeenCompactRailOnboarding
+      : DEFAULT_SIDEBAR_PREFERENCES.hasSeenCompactRailOnboarding,
   };
 }
 
@@ -73,6 +119,7 @@ export async function ensureUserProfile(
         display_name: input.displayName?.trim() || getDisplayNameFromEmail(input.email),
         timezone: DEFAULT_USER_TIMEZONE,
         notification_preferences: DEFAULT_NOTIFICATION_PREFERENCES,
+        sidebar_preferences: DEFAULT_SIDEBAR_PREFERENCES,
       },
       { onConflict: "user_id" },
     )
@@ -88,6 +135,7 @@ export async function getCurrentUserProfileSnapshot(
 ): Promise<{
   profile: UserProfile | null;
   displayName: string;
+  sidebarPreferences: UserSidebarPreferences;
   timezone: string;
   notificationPreferences: UserNotificationPreferences;
 }> {
@@ -99,6 +147,7 @@ export async function getCurrentUserProfileSnapshot(
   return {
     profile,
     displayName: resolveUserDisplayName(profile, user.email ?? null),
+    sidebarPreferences: normalizeSidebarPreferences(profile?.sidebar_preferences),
     timezone: profile?.timezone ?? DEFAULT_USER_TIMEZONE,
     notificationPreferences: normalizeNotificationPreferences(profile?.notification_preferences),
   };

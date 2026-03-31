@@ -45,6 +45,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
           id: user.id,
           email: user.email ?? null,
           displayName: currentUserProfile.displayName,
+          sidebarPreferences: currentUserProfile.sidebarPreferences,
         }}
       />
       <div className="flex-1">{children}</div>

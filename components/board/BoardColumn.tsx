@@ -69,7 +69,7 @@ export function BoardColumn({
     <section
       ref={setNodeRef}
       className={cn(
-        "surface-subpanel flex w-[300px] shrink-0 flex-col rounded-xl border p-3 transition-[border-color,background-color,box-shadow] duration-300 ease-out",
+        "surface-subpanel flex min-w-0 flex-col rounded-xl border p-3 transition-[border-color,background-color,box-shadow] duration-300 ease-out",
         hasActiveDrag && "border-border/90 dark:bg-[rgb(255_255_255_/_0.022)]",
         isOver && "border-blue-300/70 bg-linear-to-b from-blue-500/12 to-[var(--surface-panel)] shadow-[0_14px_32px_rgba(59,130,246,0.14)] dark:border-blue-400/45 dark:from-blue-400/10 dark:to-[var(--surface-panel)]",
       )}

@@ -41,7 +41,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -1655,23 +1654,44 @@ export function TaskDetailPanel({
           </aside>
         </div>
 
-        <DialogFooter className="surface-shell border-t px-6 py-4">
-          <Button type="button" variant="outline" onClick={duplicateTask} disabled={readOnly || isDuplicating || isDeleting}>
-            {isDuplicating ? <LoaderCircle className="size-4 animate-spin" /> : <Copy className="size-4" />}
-            Duplicate task
-          </Button>
-          <Button type="button" variant="destructive" onClick={deleteTask} disabled={readOnly || isDeleting || isDuplicating}>
-            {isDeleting ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-            Delete task
-          </Button>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" onClick={saveTask} disabled={readOnly || isSaving || isDeleting || isDuplicating}>
-            {isSaving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
-            Save changes
-          </Button>
-        </DialogFooter>
+        <div className="surface-shell flex flex-col gap-3 border-t px-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={duplicateTask}
+              disabled={readOnly || isDuplicating || isDeleting}
+            >
+              {isDuplicating ? <LoaderCircle className="size-4 animate-spin" /> : <Copy className="size-4" />}
+              Duplicate task
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full sm:w-auto"
+              onClick={deleteTask}
+              disabled={readOnly || isDeleting || isDuplicating}
+            >
+              {isDeleting ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+              Delete task
+            </Button>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              onClick={saveTask}
+              disabled={readOnly || isSaving || isDeleting || isDuplicating}
+            >
+              {isSaving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
+              Save changes
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

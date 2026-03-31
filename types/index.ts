@@ -22,3 +22,11 @@ export type UserNotificationPreferences = {
 	chatMentions: boolean;
 	taskReminders: boolean;
 };
+
+export type UserSidebarPreferences = {
+	pinnedWorkspaceIds: string[];
+	recentWorkspaceIds: string[];
+	pinnedProjectIdsByWorkspace: Record<string, string[]>;
+	recentProjectIdsByWorkspace: Record<string, string[]>;
+	hasSeenCompactRailOnboarding: boolean;
+};

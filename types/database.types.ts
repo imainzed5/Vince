@@ -61,6 +61,7 @@ export type Database = {
       }
       attachments: {
         Row: {
+          content_type: string | null
           created_at: string | null
           file_name: string
           file_url: string
@@ -69,6 +70,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          content_type?: string | null
           created_at?: string | null
           file_name: string
           file_url: string
@@ -77,6 +79,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          content_type?: string | null
           created_at?: string | null
           file_name?: string
           file_url?: string

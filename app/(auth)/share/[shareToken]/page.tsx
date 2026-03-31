@@ -4,6 +4,7 @@ import { ProjectSnapshotCard } from "@/components/shared/ProjectSnapshotCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getWorkspaceMemberNames } from "@/lib/supabase/member-names";
 import { getMemberDisplayName } from "@/lib/utils/displayName";
+import type { Attachment, SharedTaskImage, Task } from "@/types";
 import type { Database } from "@/types/database.types";
 
 type SharePageProps = {
@@ -11,6 +12,9 @@ type SharePageProps = {
     shareToken: string;
   }>;
 };
+
+const TASK_ATTACHMENTS_BUCKET = "task-attachments";
+const IMAGE_FILE_EXTENSION_PATTERN = /\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|webp)$/i;
 
 function createServiceRoleClient() {
   return createSupabaseClient<Database>(
@@ -23,6 +27,14 @@ function createServiceRoleClient() {
       },
     },
   );
+}
+
+function isImageAttachment(attachment: Attachment): boolean {
+  if (attachment.content_type?.toLowerCase().startsWith("image/")) {
+    return true;
+  }
+
+  return IMAGE_FILE_EXTENSION_PATTERN.test(attachment.file_name);
 }
 
 export default async function SharedProjectPage({ params }: SharePageProps) {
@@ -65,13 +77,11 @@ export default async function SharedProjectPage({ params }: SharePageProps) {
     );
   }
 
-  const [{ data: project }, { data: tasks }, { data: milestones }, { data: standups }, { data: statusUpdates }, { data: activity }] = await Promise.all([
+  const [{ data: project }, { data: tasks }, { data: milestones }, { data: statusUpdates }] = await Promise.all([
     supabase.from("projects").select("*").eq("id", share.project_id).single(),
     supabase.from("tasks").select("*").eq("project_id", share.project_id).order("position", { ascending: true }),
     supabase.from("milestones").select("*").eq("project_id", share.project_id).order("created_at", { ascending: true }),
-    supabase.from("standups").select("*").eq("project_id", share.project_id).order("created_at", { ascending: false }).limit(3),
-    supabase.from("project_status_updates").select("*").eq("project_id", share.project_id).order("created_at", { ascending: false }).limit(3),
-    supabase.from("activity_log").select("*").eq("project_id", share.project_id).order("created_at", { ascending: false }).limit(8),
+    supabase.from("project_status_updates").select("*").eq("project_id", share.project_id).order("created_at", { ascending: false }).limit(4),
   ]);
 
   if (!project) {
@@ -89,6 +99,42 @@ export default async function SharedProjectPage({ params }: SharePageProps) {
     );
   }
 
+  const taskRows = (tasks ?? []) as Task[];
+  let sharedTaskImages: SharedTaskImage[] = [];
+
+  if (taskRows.length > 0) {
+    const { data: attachments } = await supabase
+      .from("attachments")
+      .select("*")
+      .in("task_id", taskRows.map((task) => task.id))
+      .order("created_at", { ascending: false });
+
+    const signedImages = await Promise.all(
+      ((attachments ?? []) as Attachment[])
+        .filter(isImageAttachment)
+        .map(async (attachment) => {
+          const { data } = await supabase.storage
+            .from(TASK_ATTACHMENTS_BUCKET)
+            .createSignedUrl(attachment.file_url, 60 * 60);
+
+          if (!data?.signedUrl) {
+            return null;
+          }
+
+          return {
+            id: attachment.id,
+            taskId: attachment.task_id,
+            fileName: attachment.file_name,
+            contentType: attachment.content_type,
+            createdAt: attachment.created_at,
+            imageUrl: data.signedUrl,
+          } satisfies SharedTaskImage;
+        }),
+    );
+
+    sharedTaskImages = signedImages.filter((image): image is SharedTaskImage => Boolean(image));
+  }
+
   const { data: taskStatuses } = await supabase
     .from("workspace_task_statuses")
     .select("*")
@@ -101,15 +147,14 @@ export default async function SharedProjectPage({ params }: SharePageProps) {
   return (
     <main className="min-h-screen bg-background p-6 text-foreground">
       <ProjectSnapshotCard
-        activityItems={(activity ?? []) as Database["public"]["Tables"]["activity_log"]["Row"][]}
         memberNames={memberNames}
         milestones={(milestones ?? []) as Database["public"]["Tables"]["milestones"]["Row"][]}
         ownerName={ownerName}
         project={project as Database["public"]["Tables"]["projects"]["Row"]}
+        sharedTaskImages={sharedTaskImages}
         statusUpdates={(statusUpdates ?? []) as Database["public"]["Tables"]["project_status_updates"]["Row"][]}
-        standups={(standups ?? []) as Database["public"]["Tables"]["standups"]["Row"][]}
         taskStatuses={(taskStatuses ?? []) as Database["public"]["Tables"]["workspace_task_statuses"]["Row"][]}
-        tasks={(tasks ?? []) as Database["public"]["Tables"]["tasks"]["Row"][]}
+        tasks={taskRows}
       />
     </main>
   );

@@ -834,6 +834,7 @@ export function TaskDetailPanel({
           user_id: currentUserId,
           file_name: file.name,
           file_url: storagePath,
+          content_type: file.type || null,
         })
         .select("*")
         .single();

@@ -9,11 +9,21 @@ export type ProjectStatusUpdate = Database["public"]["Tables"]["project_status_u
 export type ProjectTemplate = Database["public"]["Tables"]["project_templates"]["Row"];
 export type SavedView = Database["public"]["Tables"]["saved_views"]["Row"];
 export type Task = Database["public"]["Tables"]["tasks"]["Row"];
+export type Attachment = Database["public"]["Tables"]["attachments"]["Row"];
 export type UserProfile = Database["public"]["Tables"]["user_profiles"]["Row"];
 export type TaskCustomFieldDefinition = Database["public"]["Tables"]["workspace_task_fields"]["Row"];
 export type TaskCustomFieldType = TaskCustomFieldDefinition["field_type"];
 export type WorkspaceTaskStatusDefinition = Database["public"]["Tables"]["workspace_task_statuses"]["Row"];
 export type TaskDependency = Database["public"]["Tables"]["task_dependencies"]["Row"];
+
+export type SharedTaskImage = {
+	id: string;
+	taskId: string;
+	fileName: string;
+	contentType: string | null;
+	createdAt: string | null;
+	imageUrl: string;
+};
 
 export type TaskStatus = Task["status"];
 export type TaskPriority = Task["priority"];

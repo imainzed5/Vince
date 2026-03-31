@@ -24,6 +24,7 @@ import {
   type MyTasksAttentionFilter,
   type MyTasksSortOption,
 } from "@/lib/pm-config";
+import { getRealtimeChangedRow } from "@/lib/supabase/realtime-payload";
 import { getTaskStatusLabel, isDoneTaskStatus, withTaskStatusFallbacks } from "@/lib/task-statuses";
 import { createClient } from "@/lib/supabase/client";
 import { buildTaskDependencyMaps, getTaskDueState } from "@/lib/task-insights";

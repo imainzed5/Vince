@@ -1,7 +1,9 @@
 type RouteTimingContextValue = boolean | number | string | null | undefined;
 
+type Awaitable<T> = T | PromiseLike<T>;
+
 type RouteTimingLogger = {
-  measure<T>(label: string, action: () => Promise<T>): Promise<T>;
+  measure<T>(label: string, action: () => Awaitable<T>): Promise<T>;
   finish(context?: Record<string, RouteTimingContextValue>): void;
 };
 
@@ -29,9 +31,9 @@ export function createRouteTimingLogger(route: string): RouteTimingLogger {
   const segments: Array<{ label: string; durationMs: number }> = [];
 
   return {
-    async measure<T>(label: string, action: () => Promise<T>): Promise<T> {
+    async measure<T>(label: string, action: () => Awaitable<T>): Promise<T> {
       if (!isRouteTimingEnabled) {
-        return action();
+        return await action();
       }
 
       const segmentStart = performance.now();

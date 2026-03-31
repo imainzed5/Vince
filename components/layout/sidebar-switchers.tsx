@@ -24,7 +24,7 @@ type ProjectSwitcherSection = {
 type CompactWorkspaceSwitcherProps = {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  triggerRef: React.Ref<HTMLButtonElement>;
   triggerClassName: string;
   hasSelectedWorkspace: boolean;
   workspaceDisplayName: string;
@@ -45,7 +45,7 @@ type CompactWorkspaceSwitcherProps = {
 type CompactProjectSwitcherProps = {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  triggerRef: React.Ref<HTMLButtonElement>;
   triggerClassName: string;
   workspaceDisplayName: string;
   activeProject: Project | null;

@@ -14,7 +14,7 @@ type SidebarPaletteItem = {
 type SidebarQuickSwitchDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  inputRef: React.RefObject<HTMLInputElement | null>;
+  inputRef: React.Ref<HTMLInputElement>;
   query: string;
   onQueryChange: (value: string) => void;
   items: SidebarPaletteItem[];

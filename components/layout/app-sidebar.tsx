@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname, useRouter } from "next/navigation";
@@ -606,7 +607,16 @@ export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarPro
             </div>
           ) : null}
           {!isCompactSidebar ? (
-            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-sidebar-foreground/34">Vince</p>
+            <div className="flex items-center gap-2">
+              <Image
+                src="/vince_logo.png"
+                alt="Vince"
+                width={18}
+                height={18}
+                className="h-[18px] w-[18px] object-contain"
+              />
+              <p className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-sidebar-foreground/34">Vince</p>
+            </div>
           ) : null}
           {isCompactSidebar ? <CompactRailTooltip label="Expand sidebar">{collapseToggle}</CompactRailTooltip> : collapseToggle}
         </div>

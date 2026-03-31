@@ -132,8 +132,15 @@ export default async function HomePage() {
 
       <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-[#f7f8fb]/80 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded-md bg-blue-600" />
+          <div className="flex items-center gap-2.5">
+            <Image
+              src="/vince_logo.png"
+              alt="Vince"
+              width={28}
+              height={28}
+              className="h-7 w-7 object-contain"
+              priority
+            />
             <span className="text-lg font-semibold tracking-tight">Vince</span>
           </div>
 
@@ -712,7 +719,13 @@ export default async function HomePage() {
       <footer className="border-t border-slate-800 bg-slate-950 px-6 py-12 text-sm text-slate-400">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 md:flex-row">
           <div className="flex items-center gap-2">
-            <div className="h-4 w-4 rounded-sm bg-slate-700" />
+            <Image
+              src="/vince_logo.png"
+              alt="Vince"
+              width={18}
+              height={18}
+              className="h-[18px] w-[18px] object-contain"
+            />
             <span className="font-semibold text-slate-300">Vince</span>
           </div>
           <div className="text-center md:text-right">

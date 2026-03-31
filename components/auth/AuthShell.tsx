@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { ReactNode } from "react";
 
 type AuthShellProps = {
@@ -52,9 +53,14 @@ export function AuthShell({
             <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0))]" />
             <div className="relative flex h-full flex-col gap-8">
               <div className="flex items-center gap-3">
-                <div className="flex size-7 items-center justify-center rounded-[10px] border border-white/12 bg-[linear-gradient(180deg,rgba(70,132,255,0.96),rgba(37,99,235,0.92))] text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_10px_24px_-14px_rgba(37,99,235,0.85)]">
-                  V
-                </div>
+                <Image
+                  src="/vince_logo.png"
+                  alt="Vince"
+                  width={30}
+                  height={30}
+                  className="h-[30px] w-[30px] object-contain"
+                  priority
+                />
                 <span className="text-lg font-semibold tracking-tight text-white/95">Vince</span>
               </div>
 

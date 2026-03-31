@@ -68,7 +68,7 @@ function isNotificationVisible(
 }
 
 export function NotificationInbox({ workspaceId }: NotificationInboxProps) {
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);

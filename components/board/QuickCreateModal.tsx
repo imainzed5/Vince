@@ -69,7 +69,7 @@ export function QuickCreateModal({
   onCreateRollback,
   onError,
 }: QuickCreateModalProps) {
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
   const statusColumns = useMemo(
     () => getTaskStatusColumns(withTaskStatusFallbacks(taskStatuses, [defaultStatus])),
     [defaultStatus, taskStatuses],

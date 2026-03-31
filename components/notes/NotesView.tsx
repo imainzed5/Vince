@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { toast } from "@/components/ui/sonner";
 
@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useRealtime } from "@/hooks/useRealtime";
 import { insertActivity } from "@/lib/supabase/activity";
 import { createClient } from "@/lib/supabase/client";
+import { getRealtimeNewRow, getRealtimeOldRow } from "@/lib/supabase/realtime-payload";
 import type { Database } from "@/types/database.types";
 
 type Note = Database["public"]["Tables"]["notes"]["Row"];
@@ -41,7 +42,7 @@ export function NotesView({
   isReadOnly = false,
   renderedAt,
 }: NotesViewProps) {
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
   const [notes, setNotes] = useState<Note[]>(sortNotes(initialNotes));
   const [activeNoteId, setActiveNoteId] = useState<string | null>(initialNotes[0]?.id ?? null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
@@ -141,7 +142,12 @@ export function NotesView({
         (payload) => {
           setNotes((current) => {
             if (payload.eventType === "DELETE") {
-              const removed = payload.old as Note;
+              const removed = getRealtimeOldRow<Note>(payload, "NotesView.notes.delete", ["id"]);
+
+              if (!removed) {
+                return current;
+              }
+
               const remaining = current.filter((note) => note.id !== removed.id);
 
               clearPendingRemoteNote(removed.id);
@@ -149,7 +155,16 @@ export function NotesView({
               return remaining;
             }
 
-            const incoming = payload.new as Note;
+            const incoming = getRealtimeNewRow<Note>(payload, "NotesView.notes.change", [
+              "id",
+              "project_id",
+              "updated_by",
+            ]);
+
+            if (!incoming) {
+              return current;
+            }
+
             const activeId = activeNoteIdRef.current;
             const isActiveDirty = Boolean(dirtyNotesRef.current[incoming.id]);
             const shouldHoldRemoteVersion =

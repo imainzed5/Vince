@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { toRelativeTime } from "@/lib/utils/time";
+import { formatTimestamp, toRelativeTime } from "@/lib/utils/time";
 
 type RelativeTimeTextProps = {
   value: string | null | undefined;
@@ -15,8 +15,16 @@ export function RelativeTimeText({
   initialReferenceTime,
   className,
 }: RelativeTimeTextProps) {
+  const getInitialLabel = () => {
+    if (typeof initialReferenceTime === "number") {
+      return toRelativeTime(value, initialReferenceTime);
+    }
+
+    return formatTimestamp(value, { fallback: "just now" });
+  };
+
   const [label, setLabel] = useState(() =>
-    toRelativeTime(value, initialReferenceTime),
+    getInitialLabel(),
   );
 
   useEffect(() => {

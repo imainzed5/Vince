@@ -10,9 +10,30 @@ const fullCalendarDateFormatter = new Intl.DateTimeFormat("en-GB", {
   year: "numeric",
   timeZone: "UTC",
 });
+const shortTimestampFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  timeZone: "UTC",
+});
+const fullTimestampFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  timeZone: "UTC",
+});
 
 type RelativeTimeReference = Date | number | string | null | undefined;
 type CalendarDateOptions = {
+  fallback?: string;
+  includeYear?: boolean;
+};
+type TimestampOptions = {
   fallback?: string;
   includeYear?: boolean;
 };
@@ -74,6 +95,27 @@ export function formatCalendarDate(
   return options.includeYear
     ? fullCalendarDateFormatter.format(date)
     : shortCalendarDateFormatter.format(date);
+}
+
+export function formatTimestamp(
+  value: string | null | undefined,
+  options: TimestampOptions = {},
+): string {
+  const fallback = options.fallback ?? "Unknown";
+
+  if (!value) {
+    return fallback;
+  }
+
+  const date = toCalendarDate(value);
+
+  if (!date) {
+    return fallback;
+  }
+
+  return options.includeYear
+    ? fullTimestampFormatter.format(date)
+    : shortTimestampFormatter.format(date);
 }
 
 export function toRelativeTime(

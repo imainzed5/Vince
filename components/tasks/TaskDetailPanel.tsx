@@ -196,7 +196,7 @@ export function TaskDetailPanel({
   onTaskDuplicated,
   onTaskDeleted,
 }: TaskDetailPanelProps) {
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
   const [draft, setDraft] = useState<TaskDraft | null>(task ? buildDraft(task) : null);
   const [newComment, setNewComment] = useState("");
   const [newCommentIsDecision, setNewCommentIsDecision] = useState(false);

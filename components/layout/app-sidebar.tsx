@@ -3,10 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname, useRouter } from "next/navigation";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   Activity,
-  ChevronsUpDown,
   CheckSquare2,
   Command,
   FolderKanban,
@@ -18,7 +16,6 @@ import {
   NotebookPen,
   PanelLeftClose,
   PanelLeftOpen,
-  Search,
   Settings2,
   Star,
   SlidersHorizontal,
@@ -27,26 +24,16 @@ import {
 
 import { logoutAction } from "@/app/(auth)/actions";
 import { NewProjectModal } from "@/components/shared/NewProjectModal";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { BrowserMountTimingMark } from "@/components/shared/route-timing-bridge";
+import { CompactRailOnboardingDialog, SidebarQuickSwitchDialog } from "@/components/layout/sidebar-overlays";
+import { CompactProjectSwitcher, CompactWorkspaceSwitcher } from "@/components/layout/sidebar-switchers";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
-import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useRealtime } from "@/hooks/useRealtime";
-import { DEFAULT_SIDEBAR_PREFERENCES, normalizeSidebarPreferences } from "@/lib/supabase/user-profiles";
-import { getUnreadChatCount } from "@/lib/collaboration";
-import { createClient } from "@/lib/supabase/client";
+import { useSidebarResponsive } from "@/hooks/useSidebarResponsive";
+import { useSidebarWorkspaceData } from "@/hooks/useSidebarWorkspaceData";
 import { cn } from "@/lib/utils";
-import { useUIStore } from "@/stores/uiStore";
-import { useWorkspaceStore } from "@/stores/workspaceStore";
 import type { Project, UserSidebarPreferences, Workspace } from "@/types";
 
 const workspaceNav = [
@@ -87,47 +74,11 @@ type AppSidebarProps = {
 
 type WorkspaceNavKey = (typeof workspaceNav)[number]["key"];
 
-const MAX_RECENT_WORKSPACES = 6;
-const SIDEBAR_WIDTH_STORAGE_KEY = "vince:sidebar-width";
-const SIDEBAR_AUTO_OVERRIDE_STORAGE_KEY = "vince:sidebar-auto-override";
-const AUTO_COLLAPSE_BREAKPOINT = 1220;
-const MIN_SIDEBAR_WIDTH = 288;
-const MAX_SIDEBAR_WIDTH = 420;
-const DEFAULT_SIDEBAR_WIDTH = 320;
-
 type SwitcherSection<T> = {
   key: string;
   label: string;
   items: T[];
 };
-
-function readStoredSidebarWidth(): number {
-  if (typeof window === "undefined") {
-    return DEFAULT_SIDEBAR_WIDTH;
-  }
-
-  const value = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
-
-  if (Number.isFinite(value)) {
-    return Math.min(Math.max(value, MIN_SIDEBAR_WIDTH), MAX_SIDEBAR_WIDTH);
-  }
-
-  return DEFAULT_SIDEBAR_WIDTH;
-}
-
-function readStoredSidebarAutoOverride(): "auto" | "expanded" | "collapsed" {
-  if (typeof window === "undefined") {
-    return "auto";
-  }
-
-  const value = window.localStorage.getItem(SIDEBAR_AUTO_OVERRIDE_STORAGE_KEY);
-
-  if (value === "expanded" || value === "collapsed") {
-    return value;
-  }
-
-  return "auto";
-}
 
 function buildSwitcherSections<T>({
   groups,
@@ -135,59 +86,6 @@ function buildSwitcherSections<T>({
   groups: Array<{ key: string; label: string; items: T[] }>;
 }): SwitcherSection<T>[] {
   return groups.filter((group) => group.items.length > 0);
-}
-
-function handleSwitcherItemKeyDown(event: React.KeyboardEvent<HTMLElement>) {
-  if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
-    return;
-  }
-
-  const container = event.currentTarget.closest("[data-switcher-list='true']");
-
-  if (!container) {
-    return;
-  }
-
-  const items = Array.from(container.querySelectorAll<HTMLElement>("[data-switcher-item='true']"));
-  const currentIndex = items.indexOf(event.currentTarget);
-
-  if (currentIndex === -1 || items.length === 0) {
-    return;
-  }
-
-  event.preventDefault();
-
-  if (event.key === "Home") {
-    items[0]?.focus();
-    return;
-  }
-
-  if (event.key === "End") {
-    items.at(-1)?.focus();
-    return;
-  }
-
-  const direction = event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 1;
-  const nextIndex = (currentIndex + direction + items.length) % items.length;
-  items[nextIndex]?.focus();
-}
-function focusSwitcherItemFromPanel(container: HTMLElement | null, target: "first" | "last") {
-  if (!container) {
-    return;
-  }
-
-  const items = Array.from(container.querySelectorAll<HTMLElement>("[data-switcher-item='true']"));
-
-  if (items.length === 0) {
-    return;
-  }
-
-  if (target === "first") {
-    items[0]?.focus();
-    return;
-  }
-
-  items.at(-1)?.focus();
 }
 
 function getInitials(value: string): string {
@@ -217,25 +115,30 @@ export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarPro
   const pathname = usePathname();
   const params = useParams<{ workspaceId?: string }>();
   const routeWorkspaceId = typeof params.workspaceId === "string" ? params.workspaceId : null;
-  const hasHydratedSidebar = useUIStore((state) => state.hasHydratedSidebar);
-  const hydrateSidebar = useUIStore((state) => state.hydrateSidebar);
-  const isSidebarCollapsed = useUIStore((state) => state.isSidebarCollapsed);
-  const setSidebarCollapsed = useUIStore((state) => state.setSidebarCollapsed);
-  const storedWorkspaceId = useWorkspaceStore((state) => state.currentWorkspaceId);
-  const setCurrentWorkspaceId = useWorkspaceStore((state) => state.setCurrentWorkspaceId);
-  const resolvedWorkspaceId = routeWorkspaceId ?? workspaceId ?? storedWorkspaceId;
-  const supabase = useMemo(() => createClient(), []);
-  const workspaceRequestRef = useRef(0);
-
-  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
-  const [workspaceMemberCount, setWorkspaceMemberCount] = useState<number | null>(null);
-  const [workspaceProjectCount, setWorkspaceProjectCount] = useState<number | null>(null);
-  const [userWorkspaces, setUserWorkspaces] = useState<Workspace[]>([]);
-  const [sidebarPreferences, setSidebarPreferences] = useState<UserSidebarPreferences>(() =>
-    normalizeSidebarPreferences(currentUser.sidebarPreferences),
-  );
-  const [workspaceProjects, setWorkspaceProjects] = useState<Project[]>(projects);
-  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
+  const { isCompactSidebar, sidebarWidth, handleSidebarResizeStart, handleSidebarToggle } = useSidebarResponsive();
+  const {
+    resolvedWorkspaceId,
+    setCurrentWorkspaceId,
+    workspaceName,
+    workspaceMemberCount,
+    workspaceProjectCount,
+    userWorkspaces,
+    sidebarPreferences,
+    workspaceProjects,
+    isWorkspaceLoading,
+    workspaceChatUnreadCount,
+    rememberRecentWorkspace,
+    togglePinnedWorkspace,
+    rememberRecentProject,
+    togglePinnedProject,
+    markCompactRailOnboardingSeen,
+    handleProjectCreated,
+  } = useSidebarWorkspaceData({
+    currentUser,
+    routeWorkspaceId,
+    workspaceId,
+    projects,
+  });
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [isWorkspaceSwitcherOpen, setIsWorkspaceSwitcherOpen] = useState(false);
   const [isProjectSwitcherOpen, setIsProjectSwitcherOpen] = useState(false);
@@ -244,106 +147,9 @@ export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarPro
   const [switcherPaletteQuery, setSwitcherPaletteQuery] = useState("");
   const [workspaceSearchQuery, setWorkspaceSearchQuery] = useState("");
   const [projectSearchQuery, setProjectSearchQuery] = useState("");
-  const [workspaceChatUnreadCount, setWorkspaceChatUnreadCount] = useState(0);
-  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
-  const [sidebarAutoOverride, setSidebarAutoOverride] = useState<"auto" | "expanded" | "collapsed">("auto");
-  const currentUserId = currentUser.id;
   const workspaceTriggerRef = useRef<HTMLButtonElement | null>(null);
   const projectTriggerRef = useRef<HTMLButtonElement | null>(null);
   const switcherPaletteInputRef = useRef<HTMLInputElement | null>(null);
-  const sidebarPreferencesRef = useRef(sidebarPreferences);
-  const lastAutoCollapseMatchRef = useRef<boolean | null>(null);
-
-  useEffect(() => {
-    if (!hasHydratedSidebar) {
-      hydrateSidebar();
-    }
-  }, [hasHydratedSidebar, hydrateSidebar]);
-
-  const isCompactSidebar = hasHydratedSidebar ? isSidebarCollapsed : false;
-
-  useEffect(() => {
-    const normalized = normalizeSidebarPreferences(currentUser.sidebarPreferences);
-    setSidebarPreferences(normalized);
-  }, [currentUser.sidebarPreferences]);
-
-  useEffect(() => {
-    sidebarPreferencesRef.current = sidebarPreferences;
-  }, [sidebarPreferences]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    setSidebarWidth(readStoredSidebarWidth());
-    setSidebarAutoOverride(readStoredSidebarAutoOverride());
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-  }, [sidebarWidth]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.localStorage.setItem(SIDEBAR_AUTO_OVERRIDE_STORAGE_KEY, sidebarAutoOverride);
-  }, [sidebarAutoOverride]);
-
-  useEffect(() => {
-    if (!hasHydratedSidebar || typeof window === "undefined") {
-      return;
-    }
-
-    const mediaQuery = window.matchMedia(`(max-width: ${AUTO_COLLAPSE_BREAKPOINT}px)`);
-
-    const applyResponsiveSidebar = (matches: boolean) => {
-      const previousMatches = lastAutoCollapseMatchRef.current;
-      const crossedBreakpoint = previousMatches !== null && previousMatches !== matches;
-
-      if (crossedBreakpoint) {
-        setSidebarAutoOverride("auto");
-      }
-
-      lastAutoCollapseMatchRef.current = matches;
-
-      if (sidebarAutoOverride === "expanded") {
-        if (isSidebarCollapsed) {
-          setSidebarCollapsed(false);
-        }
-        return;
-      }
-
-      if (sidebarAutoOverride === "collapsed") {
-        if (!isSidebarCollapsed) {
-          setSidebarCollapsed(true);
-        }
-        return;
-      }
-
-      if (matches !== isSidebarCollapsed) {
-        setSidebarCollapsed(matches);
-      }
-    };
-
-    applyResponsiveSidebar(mediaQuery.matches);
-
-    const handleChange = (event: MediaQueryListEvent) => {
-      applyResponsiveSidebar(event.matches);
-    };
-
-    mediaQuery.addEventListener("change", handleChange);
-
-    return () => {
-      mediaQuery.removeEventListener("change", handleChange);
-    };
-  }, [hasHydratedSidebar, isSidebarCollapsed, setSidebarCollapsed, sidebarAutoOverride]);
 
   useEffect(() => {
     if (isSwitcherPaletteOpen) {
@@ -386,211 +192,6 @@ export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarPro
     return pathname.match(regex);
   }, [pathname, resolvedWorkspaceId]);
 
-  const loadWorkspaceData = useCallback(
-    async (currentWorkspaceId: string) => {
-      const requestId = ++workspaceRequestRef.current;
-
-      setIsWorkspaceLoading(true);
-
-      const [{ data: workspaceData }, { count: memberCount }, { count: projectCount }, { data: projectData }] =
-        await Promise.all([
-          supabase.from("workspaces").select("name").eq("id", currentWorkspaceId).maybeSingle(),
-          supabase
-            .from("workspace_members")
-            .select("id", { count: "exact", head: true })
-            .eq("workspace_id", currentWorkspaceId),
-          supabase
-            .from("projects")
-            .select("id", { count: "exact", head: true })
-            .eq("workspace_id", currentWorkspaceId),
-          supabase
-            .from("projects")
-            .select("*")
-            .eq("workspace_id", currentWorkspaceId)
-            .order("created_at", { ascending: true }),
-        ]);
-
-      if (requestId !== workspaceRequestRef.current) {
-        return;
-      }
-
-      setWorkspaceName(workspaceData?.name ?? null);
-      setWorkspaceMemberCount(memberCount ?? 0);
-      setWorkspaceProjectCount(projectCount ?? 0);
-      setWorkspaceProjects((projectData ?? []) as Project[]);
-      setIsWorkspaceLoading(false);
-    },
-    [supabase],
-  );
-
-  useEffect(() => {
-    const nextWorkspaceId = routeWorkspaceId ?? workspaceId ?? null;
-
-    if (!nextWorkspaceId || nextWorkspaceId === storedWorkspaceId) {
-      return;
-    }
-
-    setCurrentWorkspaceId(nextWorkspaceId);
-  }, [routeWorkspaceId, setCurrentWorkspaceId, storedWorkspaceId, workspaceId]);
-
-  useEffect(() => {
-    if (!resolvedWorkspaceId) {
-      workspaceRequestRef.current += 1;
-      setWorkspaceName(null);
-      setWorkspaceMemberCount(null);
-      setWorkspaceProjectCount(null);
-      setWorkspaceProjects(projects);
-      setIsWorkspaceLoading(false);
-      return;
-    }
-
-    void loadWorkspaceData(resolvedWorkspaceId);
-  }, [loadWorkspaceData, projects, resolvedWorkspaceId]);
-
-  useEffect(() => {
-    async function loadUserWorkspaces() {
-      if (!currentUserId) {
-        setUserWorkspaces([]);
-        return;
-      }
-
-      const { data: memberships } = await supabase
-        .from("workspace_members")
-        .select("workspace_id, joined_at")
-        .eq("user_id", currentUserId)
-        .order("joined_at", { ascending: true });
-
-      const workspaceIds = memberships?.map((membership) => membership.workspace_id).filter(Boolean) ?? [];
-
-      if (workspaceIds.length === 0) {
-        setUserWorkspaces([]);
-        return;
-      }
-
-      const { data: workspaces } = await supabase.from("workspaces").select("*").in("id", workspaceIds);
-
-      const workspacesById = new Map((workspaces ?? []).map((workspace) => [workspace.id, workspace as Workspace]));
-      setUserWorkspaces(workspaceIds.map((id) => workspacesById.get(id)).filter((workspace): workspace is Workspace => Boolean(workspace)));
-    }
-
-    void loadUserWorkspaces();
-  }, [currentUserId, supabase]);
-
-  const persistSidebarPreferences = useCallback(
-    async (nextPreferences: UserSidebarPreferences) => {
-      sidebarPreferencesRef.current = nextPreferences;
-      setSidebarPreferences(nextPreferences);
-
-      if (!currentUserId) {
-        return;
-      }
-
-      await supabase
-        .from("user_profiles")
-        .upsert(
-          {
-            user_id: currentUserId,
-            sidebar_preferences: nextPreferences,
-          },
-          { onConflict: "user_id" },
-        );
-    },
-    [currentUserId, supabase],
-  );
-
-  const updateSidebarPreferences = useCallback(
-    (updater: (current: UserSidebarPreferences) => UserSidebarPreferences) => {
-      const nextPreferences = updater(sidebarPreferencesRef.current ?? DEFAULT_SIDEBAR_PREFERENCES);
-
-      void persistSidebarPreferences(nextPreferences);
-
-      return nextPreferences;
-    },
-    [persistSidebarPreferences],
-  );
-
-  const rememberRecentWorkspace = useCallback(
-    (workspaceId: string) => {
-      updateSidebarPreferences((current) => ({
-        ...current,
-        recentWorkspaceIds: [workspaceId, ...current.recentWorkspaceIds.filter((id) => id !== workspaceId)].slice(
-          0,
-          MAX_RECENT_WORKSPACES,
-        ),
-      }));
-    },
-    [updateSidebarPreferences],
-  );
-
-  const togglePinnedWorkspace = useCallback(
-    (workspaceId: string) => {
-      updateSidebarPreferences((current) => ({
-        ...current,
-        pinnedWorkspaceIds: current.pinnedWorkspaceIds.includes(workspaceId)
-          ? current.pinnedWorkspaceIds.filter((id) => id !== workspaceId)
-          : [workspaceId, ...current.pinnedWorkspaceIds.filter((id) => id !== workspaceId)],
-      }));
-    },
-    [updateSidebarPreferences],
-  );
-
-  const rememberRecentProject = useCallback(
-    (workspaceKey: string, projectId: string) => {
-      updateSidebarPreferences((current) => ({
-        ...current,
-        recentProjectIdsByWorkspace: {
-          ...current.recentProjectIdsByWorkspace,
-          [workspaceKey]: [
-            projectId,
-            ...(current.recentProjectIdsByWorkspace[workspaceKey] ?? []).filter((id) => id !== projectId),
-          ].slice(0, MAX_RECENT_WORKSPACES),
-        },
-      }));
-    },
-    [updateSidebarPreferences],
-  );
-
-  const togglePinnedProject = useCallback(
-    (workspaceKey: string, projectId: string) => {
-      updateSidebarPreferences((current) => {
-        const currentPinned = current.pinnedProjectIdsByWorkspace[workspaceKey] ?? [];
-
-        return {
-          ...current,
-          pinnedProjectIdsByWorkspace: {
-            ...current.pinnedProjectIdsByWorkspace,
-            [workspaceKey]: currentPinned.includes(projectId)
-              ? currentPinned.filter((id) => id !== projectId)
-              : [projectId, ...currentPinned.filter((id) => id !== projectId)],
-          },
-        };
-      });
-    },
-    [updateSidebarPreferences],
-  );
-
-  const markCompactRailOnboardingSeen = useCallback(() => {
-    if (sidebarPreferencesRef.current.hasSeenCompactRailOnboarding) {
-      setIsCompactRailOnboardingOpen(false);
-      return;
-    }
-
-    updateSidebarPreferences((current) => ({
-      ...current,
-      hasSeenCompactRailOnboarding: true,
-    }));
-    setIsCompactRailOnboardingOpen(false);
-  }, [updateSidebarPreferences]);
-
-  const handleSidebarToggle = useCallback(() => {
-    const nextCollapsed = !isSidebarCollapsed;
-
-    setSidebarCollapsed(nextCollapsed);
-
-    // Any direct toggle is a manual override; responsive auto mode resumes only after a breakpoint crossing.
-    setSidebarAutoOverride(nextCollapsed ? "collapsed" : "expanded");
-  }, [isSidebarCollapsed, setSidebarCollapsed]);
-
   const handleWorkspaceSwitcherOpenChange = useCallback((open: boolean) => {
     setIsWorkspaceSwitcherOpen(open);
 
@@ -608,28 +209,6 @@ export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarPro
       window.setTimeout(() => projectTriggerRef.current?.focus(), 0);
     }
   }, []);
-
-  const handleSidebarResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (isCompactSidebar) {
-      return;
-    }
-
-    const startX = event.clientX;
-    const startWidth = sidebarWidth;
-
-    const handlePointerMove = (pointerEvent: PointerEvent) => {
-      const nextWidth = Math.min(Math.max(startWidth + (pointerEvent.clientX - startX), MIN_SIDEBAR_WIDTH), MAX_SIDEBAR_WIDTH);
-      setSidebarWidth(nextWidth);
-    };
-
-    const handlePointerUp = () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-  }, [isCompactSidebar, sidebarWidth]);
 
   useEffect(() => {
     setIsWorkspaceSwitcherOpen(false);
@@ -901,142 +480,10 @@ export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarPro
     return Boolean(resolvedWorkspaceId) && pathname === `/workspace/${resolvedWorkspaceId}/${key}`;
   };
 
-  const handleProjectCreated = (project: Project) => {
-    setWorkspaceProjects((current) => [...current, project]);
-    setWorkspaceProjectCount((current) => (typeof current === "number" ? current + 1 : 1));
-  };
-
-  const refreshWorkspaceChatUnread = useCallback(async () => {
-    if (!resolvedWorkspaceId || !currentUserId) {
-      setWorkspaceChatUnreadCount(0);
-      return;
-    }
-
-    const nextCount = await getUnreadChatCount(supabase, {
-      workspaceId: resolvedWorkspaceId,
-      projectId: null,
-      userId: currentUserId,
-    });
-
-    setWorkspaceChatUnreadCount(nextCount);
-  }, [currentUserId, resolvedWorkspaceId, supabase]);
-
-  useEffect(() => {
-    void refreshWorkspaceChatUnread();
-  }, [refreshWorkspaceChatUnread]);
-
-  const setupMessagesChannel = useCallback(
-    (channel: RealtimeChannel) =>
-      channel.on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "messages",
-          filter: resolvedWorkspaceId ? `workspace_id=eq.${resolvedWorkspaceId}` : undefined,
-        },
-        (payload) => {
-          const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as {
-            project_id: string | null;
-          };
-
-          if (row?.project_id !== null) {
-            return;
-          }
-
-          void refreshWorkspaceChatUnread();
-        },
-      ),
-    [refreshWorkspaceChatUnread, resolvedWorkspaceId],
-  );
-
-  useRealtime({
-    enabled: Boolean(resolvedWorkspaceId && currentUserId),
-    name: resolvedWorkspaceId ? `workspace:${resolvedWorkspaceId}:sidebar-messages` : "workspace:sidebar-messages",
-    supabase,
-    setup: setupMessagesChannel,
-  });
-
-  const setupReadStateChannel = useCallback(
-    (channel: RealtimeChannel) =>
-      channel.on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "chat_read_states",
-          filter: currentUserId ? `user_id=eq.${currentUserId}` : undefined,
-        },
-        () => {
-          void refreshWorkspaceChatUnread();
-        },
-      ),
-    [currentUserId, refreshWorkspaceChatUnread],
-  );
-
-  useRealtime({
-    enabled: Boolean(resolvedWorkspaceId && currentUserId),
-    name: resolvedWorkspaceId ? `workspace:${resolvedWorkspaceId}:sidebar-read-state` : "workspace:sidebar-read-state",
-    supabase,
-    setup: setupReadStateChannel,
-  });
-
-  const refreshWorkspaceStructure = useCallback(() => {
-    if (!resolvedWorkspaceId) {
-      return;
-    }
-
-    void loadWorkspaceData(resolvedWorkspaceId);
-  }, [loadWorkspaceData, resolvedWorkspaceId]);
-
-  const setupWorkspaceStructureChannel = useCallback(
-    (channel: RealtimeChannel) =>
-      channel
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "workspaces",
-            filter: resolvedWorkspaceId ? `id=eq.${resolvedWorkspaceId}` : undefined,
-          },
-          () => {
-            refreshWorkspaceStructure();
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "workspace_members",
-            filter: resolvedWorkspaceId ? `workspace_id=eq.${resolvedWorkspaceId}` : undefined,
-          },
-          () => {
-            refreshWorkspaceStructure();
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "projects",
-            filter: resolvedWorkspaceId ? `workspace_id=eq.${resolvedWorkspaceId}` : undefined,
-          },
-          () => {
-            refreshWorkspaceStructure();
-          },
-        ),
-    [refreshWorkspaceStructure, resolvedWorkspaceId],
-  );
-
-  useRealtime({
-    enabled: Boolean(resolvedWorkspaceId),
-    name: resolvedWorkspaceId ? `workspace:${resolvedWorkspaceId}:sidebar-structure` : "workspace:sidebar-structure",
-    supabase,
-    setup: setupWorkspaceStructureChannel,
-  });
+  const handleCompactRailOnboardingContinue = useCallback(() => {
+    markCompactRailOnboardingSeen();
+    setIsCompactRailOnboardingOpen(false);
+  }, [markCompactRailOnboardingSeen]);
 
   const panelClassName =
     "rounded-[26px] border border-white/80 bg-white/72 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.88)] supports-[backdrop-filter]:bg-white/60 supports-[backdrop-filter]:backdrop-blur-xl dark:border-white/6 dark:bg-white/4 dark:shadow-[0_28px_52px_-34px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.04)] dark:supports-[backdrop-filter]:bg-black/26";
@@ -1109,7 +556,6 @@ export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarPro
   const workspaceDisplayName = workspaceName ?? "Workspace";
   const workspaceMonogram = hasSelectedWorkspace ? getInitials(workspaceDisplayName) : "?";
   const isWorkspaceHomeActive = Boolean(resolvedWorkspaceId) && pathname === `/workspace/${resolvedWorkspaceId}`;
-  const workspaceSwitcherLabel = hasSelectedWorkspace ? `${workspaceDisplayName} workspace switcher` : "Workspace switcher";
   const collapseToggle = (
     <button
       type="button"
@@ -1133,6 +579,14 @@ export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarPro
         )}
         style={!isCompactSidebar ? { width: sidebarWidth } : undefined}
       >
+        <BrowserMountTimingMark
+          name="app-sidebar"
+          context={{
+            workspaceId: resolvedWorkspaceId,
+            projectCount: workspaceProjects.length,
+            compact: isCompactSidebar,
+          }}
+        />
         {!isCompactSidebar ? (
           <div
             role="separator"
@@ -1160,162 +614,32 @@ export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarPro
         <div className={cn(panelClassName, isCompactSidebar ? "p-1.5" : "p-4")}>
           {isCompactSidebar ? (
             <div className="flex flex-col items-center gap-1.5">
-              <Popover open={isWorkspaceSwitcherOpen} onOpenChange={handleWorkspaceSwitcherOpenChange}>
-                <PopoverTrigger
-                  render={
-                    <button
-                      ref={workspaceTriggerRef}
-                      type="button"
-                      aria-label={hasSelectedWorkspace ? `${workspaceDisplayName} workspace switcher` : workspaceSwitcherLabel}
-                      className={cn(
-                        compactTileClassName(isWorkspaceHomeActive || isWorkspaceSwitcherOpen),
-                        isWorkspaceSwitcherOpen && "ring-2 ring-sidebar-primary/45 ring-offset-2 ring-offset-sidebar",
-                      )}
-                    >
-                      {hasSelectedWorkspace ? (
-                        <Avatar size="sm">
-                          <AvatarFallback>{workspaceMonogram}</AvatarFallback>
-                        </Avatar>
-                      ) : (
-                        <Layers3 className="size-4" />
-                      )}
-                      <span className="absolute bottom-1 right-1 rounded-full bg-white/88 p-0.5 text-sidebar-foreground/60 shadow-[0_4px_10px_-8px_rgba(15,23,42,0.6)] dark:bg-[#1b2028] dark:text-sidebar-foreground/72">
-                        <ChevronsUpDown className="size-2.5" />
-                      </span>
-                      {workspaceChatUnreadCount > 0 ? (
-                        <span className="absolute left-2 top-2 size-2 rounded-full bg-sidebar-primary" />
-                      ) : null}
-                    </button>
-                  }
-                />
-                <PopoverContent side="right" sideOffset={14} className="w-80 rounded-[24px] p-2.5">
-                  <div className="px-2 pb-2 pt-1">
-                    <p className="text-[0.64rem] font-semibold uppercase tracking-[0.2em] text-white/48">Workspace switcher</p>
-                    <p className="mt-1 truncate text-sm font-semibold text-white">{workspaceDisplayName}</p>
-                    {orderedWorkspaces.length > 7 ? (
-                      <div className="relative mt-3" data-switcher-panel="true">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-white/34" />
-                        <Input
-                          value={workspaceSearchQuery}
-                          onChange={(event) => setWorkspaceSearchQuery(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "ArrowDown" || event.key === "Home") {
-                              event.preventDefault();
-                              focusSwitcherItemFromPanel(event.currentTarget.closest("[data-switcher-panel='true']"), "first");
-                            }
-
-                            if (event.key === "End") {
-                              event.preventDefault();
-                              focusSwitcherItemFromPanel(event.currentTarget.closest("[data-switcher-panel='true']"), "last");
-                            }
-                          }}
-                          placeholder="Search workspaces"
-                          className="h-9 rounded-[16px] border-white/10 bg-white/8 pl-9 text-sm text-white placeholder:text-white/34 focus-visible:border-white/16 focus-visible:ring-white/20 dark:bg-white/6"
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                  {workspaceSwitcherSections.length > 0 ? (
-                    <div data-switcher-panel="true" className="max-h-80 space-y-3 overflow-y-auto pr-1">
-                      {workspaceSwitcherSections.map((section) => (
-                        <div key={section.key}>
-                          <p className="px-2 pb-1 text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-white/34">
-                            {section.label}
-                          </p>
-                          <div data-switcher-list="true" className="space-y-1">
-                            {section.items.map((workspace) => {
-                              const href = `/workspace/${workspace.id}`;
-                              const isCurrentWorkspace = resolvedWorkspaceId === workspace.id;
-                              const isPinnedWorkspace = pinnedWorkspaceIdSet.has(workspace.id);
-                              const isRecentWorkspace = recentWorkspaceIdSet.has(workspace.id);
-                              const workspaceMetaLabel = isPinnedWorkspace
-                                ? "Pinned workspace"
-                                : isRecentWorkspace
-                                  ? "Recent workspace"
-                                  : "Workspace";
-
-                              return (
-                                <div
-                                  key={workspace.id}
-                                  className={cn(
-                                    "group flex items-center gap-2 rounded-[18px] border border-transparent px-2 py-2 text-white/82 transition-[background-color,border-color,color] duration-150",
-                                    isCurrentWorkspace && "border-white/10 bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]",
-                                  )}
-                                >
-                                  <Link
-                                    href={href}
-                                    data-switcher-item="true"
-                                    onClick={() => {
-                                      setCurrentWorkspaceId(workspace.id);
-                                      rememberRecentWorkspace(workspace.id);
-                                      handleWorkspaceSwitcherOpenChange(false);
-                                    }}
-                                    onKeyDown={(event) => {
-                                      if (event.key === "Escape") {
-                                        event.preventDefault();
-                                        handleWorkspaceSwitcherOpenChange(false);
-                                        return;
-                                      }
-
-                                      handleSwitcherItemKeyDown(event);
-                                    }}
-                                    className="flex min-w-0 flex-1 items-center gap-3 rounded-[16px] px-1 py-0.5 text-left text-white/82 transition-[background-color,border-color,color,transform,box-shadow] duration-150 motion-safe:ease-out motion-safe:hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/28 focus-visible:ring-offset-2 focus-visible:ring-offset-[rgba(15,18,24,0.96)] hover:text-white"
-                                  >
-                                    <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-[0.65rem] font-semibold text-white">
-                                      {getInitials(workspace.name).slice(0, 2)}
-                                    </span>
-                                    <div className="min-w-0 flex-1">
-                                      <p className="truncate text-sm font-medium">{workspace.name}</p>
-                                      <p className="mt-0.5 text-[0.68rem] text-white/46">{workspaceMetaLabel}</p>
-                                    </div>
-                                    {isCurrentWorkspace ? <span className="text-[0.68rem] font-medium text-white/54">Open</span> : null}
-                                  </Link>
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      togglePinnedWorkspace(workspace.id);
-                                    }}
-                                    className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-white/44 transition-colors hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/28 focus-visible:ring-offset-2 focus-visible:ring-offset-[rgba(15,18,24,0.96)]"
-                                    aria-label={isPinnedWorkspace ? `Unpin ${workspace.name}` : `Pin ${workspace.name}`}
-                                  >
-                                    <Star className={cn("size-4", isPinnedWorkspace && "fill-current text-amber-300")} />
-                                  </button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="rounded-[18px] border border-dashed border-white/10 bg-white/4 px-3 py-4 text-sm leading-6 text-white/58">
-                      {workspaceSearchQuery ? "No workspaces match that search." : "No workspaces found yet."}
-                    </div>
-                  )}
-                  <div className="mt-2 grid grid-cols-2 gap-1.5">
-                    <Link
-                      href="/dashboard"
-                      onClick={() => handleWorkspaceSwitcherOpenChange(false)}
-                      className="flex h-9 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-[0.76rem] font-medium text-white/82 transition-[background-color,border-color,color,transform] duration-150 motion-safe:ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/28 focus-visible:ring-offset-2 focus-visible:ring-offset-[rgba(15,18,24,0.96)] hover:border-white/14 hover:bg-white/10 hover:text-white motion-safe:hover:-translate-y-px"
-                    >
-                      All workspaces
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleWorkspaceSwitcherOpenChange(false);
-                        router.push("/create-workspace");
-                      }}
-                      className="flex h-9 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-[0.76rem] font-medium text-white/82 transition-[background-color,border-color,color,transform] duration-150 motion-safe:ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/28 focus-visible:ring-offset-2 focus-visible:ring-offset-[rgba(15,18,24,0.96)] hover:border-white/14 hover:bg-white/10 hover:text-white motion-safe:hover:-translate-y-px"
-                    >
-                      Create or join
-                    </button>
-                  </div>
-                  <p className="mt-2 px-2 text-[0.66rem] text-white/40">Keyboard: Arrow keys move focus, Home and End jump, Escape closes.</p>
-                </PopoverContent>
-              </Popover>
+              <CompactWorkspaceSwitcher
+                isOpen={isWorkspaceSwitcherOpen}
+                onOpenChange={handleWorkspaceSwitcherOpenChange}
+                triggerRef={workspaceTriggerRef}
+                triggerClassName={cn(
+                  compactTileClassName(isWorkspaceHomeActive || isWorkspaceSwitcherOpen),
+                  isWorkspaceSwitcherOpen && "ring-2 ring-sidebar-primary/45 ring-offset-2 ring-offset-sidebar",
+                )}
+                hasSelectedWorkspace={hasSelectedWorkspace}
+                workspaceDisplayName={workspaceDisplayName}
+                workspaceMonogram={workspaceMonogram}
+                workspaceChatUnreadCount={workspaceChatUnreadCount}
+                orderedWorkspaces={orderedWorkspaces}
+                searchQuery={workspaceSearchQuery}
+                onSearchQueryChange={setWorkspaceSearchQuery}
+                sections={workspaceSwitcherSections}
+                resolvedWorkspaceId={resolvedWorkspaceId}
+                pinnedWorkspaceIds={pinnedWorkspaceIdSet}
+                recentWorkspaceIds={recentWorkspaceIdSet}
+                onSelectWorkspace={(selectedWorkspaceId) => {
+                  setCurrentWorkspaceId(selectedWorkspaceId);
+                  rememberRecentWorkspace(selectedWorkspaceId);
+                }}
+                onTogglePinnedWorkspace={togglePinnedWorkspace}
+                onCreateOrJoin={() => router.push("/create-workspace")}
+              />
             </div>
           ) : (
             <>
@@ -1469,180 +793,34 @@ export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarPro
           {isCompactSidebar ? (
             <div className="space-y-1.5">
               {resolvedWorkspaceId ? (
-                <Popover open={isProjectSwitcherOpen} onOpenChange={handleProjectSwitcherOpenChange}>
-                  <PopoverTrigger
-                    render={
-                      <button
-                        ref={projectTriggerRef}
-                        type="button"
-                        aria-label={activeProject ? `${activeProject.name} project switcher` : `Project switcher for ${workspaceDisplayName}`}
-                        className={cn(
-                          compactTileClassName(Boolean(activeProjectId) || isProjectSwitcherOpen),
-                          isProjectSwitcherOpen && "ring-2 ring-sidebar-primary/45 ring-offset-2 ring-offset-sidebar",
-                        )}
-                      >
-                        {activeProject ? (
-                          <span className="relative inline-flex size-7 items-center justify-center rounded-full bg-white/80 text-[0.65rem] font-semibold text-sidebar-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] dark:bg-white/8 dark:text-sidebar-foreground/86 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                            {getInitials(activeProject.name).slice(0, 2)}
-                            <span
-                              className={cn(
-                                "absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-white dark:ring-[#121317]",
-                                projectPhaseDot[activeProject.phase] ?? "bg-slate-400",
-                              )}
-                            />
-                          </span>
-                        ) : (
-                          <FolderKanban className="size-4" />
-                        )}
-                        <span className="absolute bottom-1 right-1 rounded-full bg-white/88 p-0.5 text-sidebar-foreground/60 shadow-[0_4px_10px_-8px_rgba(15,23,42,0.6)] dark:bg-[#1b2028] dark:text-sidebar-foreground/72">
-                          <ChevronsUpDown className="size-2.5" />
-                        </span>
-                      </button>
+                <CompactProjectSwitcher
+                  isOpen={isProjectSwitcherOpen}
+                  onOpenChange={handleProjectSwitcherOpenChange}
+                  triggerRef={projectTriggerRef}
+                  triggerClassName={cn(
+                    compactTileClassName(Boolean(activeProjectId) || isProjectSwitcherOpen),
+                    isProjectSwitcherOpen && "ring-2 ring-sidebar-primary/45 ring-offset-2 ring-offset-sidebar",
+                  )}
+                  workspaceDisplayName={workspaceDisplayName}
+                  activeProject={activeProject}
+                  activeProjectId={activeProjectId}
+                  resolvedWorkspaceId={resolvedWorkspaceId}
+                  orderedProjects={orderedProjects}
+                  searchQuery={projectSearchQuery}
+                  onSearchQueryChange={setProjectSearchQuery}
+                  sections={projectSwitcherSections}
+                  pinnedProjectIds={pinnedProjectIdSet}
+                  onSelectProject={(projectId, destination) => {
+                    rememberRecentProject(resolvedWorkspaceId, projectId);
+
+                    if (destination === "overview") {
+                      router.push(`/workspace/${resolvedWorkspaceId}/project/${projectId}/overview`);
                     }
-                  />
-                  <PopoverContent side="right" sideOffset={14} className="w-80 rounded-[24px] p-2.5">
-                    <div className="px-2 pb-2 pt-1">
-                      <p className="text-[0.64rem] font-semibold uppercase tracking-[0.2em] text-white/48">Project switcher</p>
-                      <p className="mt-1 truncate text-sm font-semibold text-white">{workspaceDisplayName}</p>
-                      {orderedProjects.length > 7 ? (
-                        <div className="relative mt-3" data-switcher-panel="true">
-                          <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-white/34" />
-                          <Input
-                            value={projectSearchQuery}
-                            onChange={(event) => setProjectSearchQuery(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "ArrowDown" || event.key === "Home") {
-                                event.preventDefault();
-                                focusSwitcherItemFromPanel(event.currentTarget.closest("[data-switcher-panel='true']"), "first");
-                              }
-
-                              if (event.key === "End") {
-                                event.preventDefault();
-                                focusSwitcherItemFromPanel(event.currentTarget.closest("[data-switcher-panel='true']"), "last");
-                              }
-                            }}
-                            placeholder="Search projects"
-                            className="h-9 rounded-[16px] border-white/10 bg-white/8 pl-9 text-sm text-white placeholder:text-white/34 focus-visible:border-white/16 focus-visible:ring-white/20 dark:bg-white/6"
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                    {projectSwitcherSections.length > 0 ? (
-                      <div data-switcher-panel="true" className="max-h-80 space-y-3 overflow-y-auto pr-1">
-                        {projectSwitcherSections.map((section) => (
-                          <div key={section.key}>
-                            <p className="px-2 pb-1 text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-white/34">
-                              {section.label}
-                            </p>
-                            <div data-switcher-list="true" className="space-y-1">
-                              {section.items.map((project) => {
-                                const boardHref = `/workspace/${resolvedWorkspaceId}/project/${project.id}/board`;
-                                const overviewHref = `/workspace/${resolvedWorkspaceId}/project/${project.id}/overview`;
-                                const isCurrentProject = activeProjectId === project.id;
-                                const isPinnedProject = pinnedProjectIdSet.has(project.id);
-
-                                return (
-                                  <div
-                                    key={project.id}
-                                    className={cn(
-                                      "group flex items-center gap-2 rounded-[18px] border border-transparent px-2 py-2 text-white/82 transition-[background-color,border-color,color] duration-150",
-                                      isCurrentProject && "border-white/10 bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]",
-                                    )}
-                                  >
-                                    <Link
-                                      href={boardHref}
-                                      onClick={() => {
-                                        rememberRecentProject(resolvedWorkspaceId, project.id);
-                                        handleProjectSwitcherOpenChange(false);
-                                      }}
-                                      onKeyDown={(event) => {
-                                        if (event.key === "Escape") {
-                                          event.preventDefault();
-                                          handleProjectSwitcherOpenChange(false);
-                                          return;
-                                        }
-
-                                        handleSwitcherItemKeyDown(event);
-                                      }}
-                                      data-switcher-item="true"
-                                      className="flex min-w-0 flex-1 items-center gap-3 rounded-[16px] px-1 py-0.5 text-left text-white/82 transition-[background-color,border-color,color,transform] duration-150 motion-safe:ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/28 focus-visible:ring-offset-2 focus-visible:ring-offset-[rgba(15,18,24,0.96)] hover:text-white motion-safe:hover:-translate-y-px"
-                                    >
-                                      <span className="relative inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-[0.65rem] font-semibold text-white">
-                                        {getInitials(project.name).slice(0, 2)}
-                                        <span
-                                          className={cn(
-                                            "absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-[rgba(15,18,24,0.96)]",
-                                            projectPhaseDot[project.phase] ?? "bg-slate-400",
-                                          )}
-                                        />
-                                      </span>
-                                      <div className="min-w-0 flex-1">
-                                        <p className="truncate text-sm font-medium">{project.name}</p>
-                                        <p className="mt-0.5 text-[0.68rem] text-white/46">
-                                          {isPinnedProject ? "Pinned project" : project.status === "archived" ? "Archived" : project.phase.replaceAll("_", " ")}
-                                        </p>
-                                      </div>
-                                      {isCurrentProject ? <span className="text-[0.68rem] font-medium text-white/54">Open</span> : null}
-                                    </Link>
-                                    <div className="flex items-center gap-1">
-                                      <button
-                                        type="button"
-                                        onClick={(event) => {
-                                          event.preventDefault();
-                                          event.stopPropagation();
-                                          togglePinnedProject(resolvedWorkspaceId, project.id);
-                                        }}
-                                        className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-white/44 transition-colors hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/28 focus-visible:ring-offset-2 focus-visible:ring-offset-[rgba(15,18,24,0.96)]"
-                                        aria-label={isPinnedProject ? `Unpin ${project.name}` : `Pin ${project.name}`}
-                                      >
-                                        <Star className={cn("size-4", isPinnedProject && "fill-current text-amber-300")} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          rememberRecentProject(resolvedWorkspaceId, project.id);
-                                          handleProjectSwitcherOpenChange(false);
-                                          router.push(overviewHref);
-                                        }}
-                                        className="inline-flex h-8 shrink-0 items-center justify-center rounded-full px-2 text-[0.66rem] font-medium text-white/56 transition-colors hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/28 focus-visible:ring-offset-2 focus-visible:ring-offset-[rgba(15,18,24,0.96)]"
-                                      >
-                                        View
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="rounded-[18px] border border-dashed border-white/10 bg-white/4 px-3 py-4 text-sm leading-6 text-white/58">
-                        {projectSearchQuery ? "No projects match that search." : "This workspace has no projects yet."}
-                      </div>
-                    )}
-                    <div className="mt-2 grid grid-cols-2 gap-1.5">
-                      <Link
-                        href={`/workspace/${resolvedWorkspaceId}`}
-                        onClick={() => handleProjectSwitcherOpenChange(false)}
-                        className="flex h-9 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-[0.76rem] font-medium text-white/82 transition-[background-color,border-color,color,transform] duration-150 motion-safe:ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/28 focus-visible:ring-offset-2 focus-visible:ring-offset-[rgba(15,18,24,0.96)] hover:border-white/14 hover:bg-white/10 hover:text-white motion-safe:hover:-translate-y-px"
-                      >
-                        Workspace
-                      </Link>
-                      <button
-                        type="button"
-                        className="flex h-9 items-center justify-center rounded-[16px] border border-white/10 bg-white/6 text-[0.76rem] font-medium text-white/82 transition-[background-color,border-color,color,transform] duration-150 motion-safe:ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/28 focus-visible:ring-offset-2 focus-visible:ring-offset-[rgba(15,18,24,0.96)] hover:border-white/14 hover:bg-white/10 hover:text-white motion-safe:hover:-translate-y-px"
-                        onClick={() => {
-                          handleProjectSwitcherOpenChange(false);
-                          setIsProjectModalOpen(true);
-                        }}
-                      >
-                        New project
-                      </button>
-                    </div>
-                    <p className="mt-2 px-2 text-[0.66rem] text-white/40">Keyboard: Arrow keys move focus, Home and End jump, Escape closes.</p>
-                  </PopoverContent>
-                </Popover>
+                  }}
+                  onTogglePinnedProject={(projectId) => togglePinnedProject(resolvedWorkspaceId, projectId)}
+                  onNewProject={() => setIsProjectModalOpen(true)}
+                  projectPhaseDot={projectPhaseDot}
+                />
               ) : (
                 <CompactRailTooltip label="Select a workspace first">
                   <div aria-disabled="true" className={cn(compactTileClassName(false), "cursor-not-allowed text-sidebar-foreground/34") }>
@@ -1833,67 +1011,19 @@ export function AppSidebar({ currentUser, workspaceId, projects }: AppSidebarPro
           onCreated={handleProjectCreated}
         />
       ) : null}
-      <Dialog open={isSwitcherPaletteOpen} onOpenChange={setIsSwitcherPaletteOpen}>
-        <DialogContent className="max-w-lg rounded-[24px] border border-white/10 bg-[#0f1218] p-0 text-white shadow-[0_28px_60px_-28px_rgba(0,0,0,0.82)]">
-          <DialogHeader className="border-b border-white/8 px-5 py-4">
-            <DialogTitle>Quick switch</DialogTitle>
-            <DialogDescription>Jump between workspaces, projects, and common actions.</DialogDescription>
-          </DialogHeader>
-          <div className="px-5 py-4">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-white/34" />
-              <Input
-                ref={switcherPaletteInputRef}
-                value={switcherPaletteQuery}
-                onChange={(event) => setSwitcherPaletteQuery(event.target.value)}
-                placeholder="Search workspaces, projects, or actions"
-                className="h-11 rounded-[16px] border-white/10 bg-white/6 pl-10 text-sm text-white placeholder:text-white/34 focus-visible:border-white/16 focus-visible:ring-white/20 dark:bg-white/6"
-              />
-            </div>
-            <div className="mt-4 max-h-80 space-y-1 overflow-y-auto pr-1">
-              {paletteResults.length > 0 ? (
-                paletteResults.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={item.onSelect}
-                    className="flex w-full items-center justify-between rounded-[16px] border border-transparent bg-white/4 px-3 py-2.5 text-left text-white/82 transition-[background-color,border-color,color,transform] duration-150 motion-safe:ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/24 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f1218] hover:border-white/10 hover:bg-white/8 hover:text-white motion-safe:hover:-translate-y-px"
-                  >
-                    <span className="truncate text-sm font-medium">{item.label}</span>
-                    <span className="ml-3 shrink-0 text-[0.7rem] uppercase tracking-[0.16em] text-white/38">{item.meta}</span>
-                  </button>
-                ))
-              ) : (
-                <div className="rounded-[18px] border border-dashed border-white/10 bg-white/4 px-3 py-5 text-sm text-white/54">
-                  No matches for that search.
-                </div>
-              )}
-            </div>
-            <p className="mt-3 text-[0.68rem] text-white/38">Shortcut: Ctrl/Cmd + K</p>
-          </div>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={isCompactRailOnboardingOpen} onOpenChange={setIsCompactRailOnboardingOpen}>
-        <DialogContent className="max-w-md rounded-[24px] border border-white/10 bg-[#0f1218] text-white shadow-[0_28px_60px_-28px_rgba(0,0,0,0.82)]">
-          <DialogHeader>
-            <DialogTitle>Compact rail</DialogTitle>
-            <DialogDescription>
-              The collapsed sidebar keeps workspace and project switching one click away. Hover for labels, use the switchers for pinning, and press Ctrl/Cmd + K to jump faster.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 text-sm text-white/74">
-            <p>Workspace and project chips now surface recent and pinned items.</p>
-            <p>Unread chat stays visible on the workspace chip in compact mode.</p>
-          </div>
-          <button
-            type="button"
-            onClick={markCompactRailOnboardingSeen}
-            className="mt-2 inline-flex h-10 items-center justify-center rounded-[16px] border border-white/10 bg-white/8 px-4 text-sm font-medium text-white transition-colors hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/28"
-          >
-            Continue
-          </button>
-        </DialogContent>
-      </Dialog>
+      <SidebarQuickSwitchDialog
+        open={isSwitcherPaletteOpen}
+        onOpenChange={setIsSwitcherPaletteOpen}
+        inputRef={switcherPaletteInputRef}
+        query={switcherPaletteQuery}
+        onQueryChange={setSwitcherPaletteQuery}
+        items={paletteResults}
+      />
+      <CompactRailOnboardingDialog
+        open={isCompactRailOnboardingOpen}
+        onOpenChange={setIsCompactRailOnboardingOpen}
+        onContinue={handleCompactRailOnboardingContinue}
+      />
       </aside>
     </TooltipProvider>
   );

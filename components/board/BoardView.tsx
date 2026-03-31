@@ -151,7 +151,7 @@ export function BoardView({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
   const selectedTaskId = useTaskStore((state) => state.selectedTaskId);
   const setSelectedTaskId = useTaskStore((state) => state.setSelectedTaskId);
   const [toastMessage, setToastMessage] = useState<string | null>(null);

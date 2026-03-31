@@ -42,7 +42,7 @@ export function NewProjectModal({
   workspaceId,
   onCreated,
 }: NewProjectModalProps) {
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
   const router = useRouter();
 
   const [name, setName] = useState("");

@@ -3,6 +3,7 @@ import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 
 import { getMemberDisplayName } from "@/lib/utils/displayName";
 import { useRealtime } from "@/hooks/useRealtime";
+import { getRealtimeNewRow, getRealtimeOldRow } from "@/lib/supabase/realtime-payload";
 import type { Task } from "@/types";
 import type { Database } from "@/types/database.types";
 
@@ -136,11 +137,28 @@ export function useTaskThread({
         },
         (payload) => {
           if (payload.eventType === "DELETE") {
-            onRemoteTaskDelete?.((payload.old as Task).id);
+            const removedTask = getRealtimeOldRow<Task>(payload, "useTaskThread.task.delete", ["id"]);
+
+            if (!removedTask) {
+              return;
+            }
+
+            onRemoteTaskDelete?.(removedTask.id);
             return;
           }
 
-          onRemoteTaskChange?.(payload.new as Task);
+          const updatedTask = getRealtimeNewRow<Task>(payload, "useTaskThread.task.change", [
+            "id",
+            "project_id",
+            "status",
+            "title",
+          ]);
+
+          if (!updatedTask) {
+            return;
+          }
+
+          onRemoteTaskChange?.(updatedTask);
         },
       );
     },
@@ -171,12 +189,28 @@ export function useTaskThread({
         (payload) => {
           setComments((current) => {
             if (payload.eventType === "DELETE") {
-              const removed = payload.old as TaskComment;
+              const removed = getRealtimeOldRow<TaskComment>(payload, "useTaskThread.comments.delete", ["id"]);
+
+              if (!removed) {
+                return current;
+              }
+
               return current.filter((comment) => comment.id !== removed.id);
             }
 
             if (payload.eventType === "INSERT") {
-              const inserted = toCommentViewModel(payload.new as TaskComment, memberNameMap, currentUserId);
+              const insertedComment = getRealtimeNewRow<TaskComment>(payload, "useTaskThread.comments.insert", [
+                "id",
+                "task_id",
+                "user_id",
+                "content",
+              ]);
+
+              if (!insertedComment) {
+                return current;
+              }
+
+              const inserted = toCommentViewModel(insertedComment, memberNameMap, currentUserId);
 
               if (current.some((comment) => comment.id === inserted.id)) {
                 return current;
@@ -185,7 +219,18 @@ export function useTaskThread({
               return [...current, inserted];
             }
 
-            const updated = toCommentViewModel(payload.new as TaskComment, memberNameMap, currentUserId);
+            const updatedComment = getRealtimeNewRow<TaskComment>(payload, "useTaskThread.comments.update", [
+              "id",
+              "task_id",
+              "user_id",
+              "content",
+            ]);
+
+            if (!updatedComment) {
+              return current;
+            }
+
+            const updated = toCommentViewModel(updatedComment, memberNameMap, currentUserId);
             return current.map((comment) => (comment.id === updated.id ? updated : comment));
           });
         },
@@ -218,12 +263,26 @@ export function useTaskThread({
         (payload) => {
           setAttachments((current) => {
             if (payload.eventType === "DELETE") {
-              const removed = payload.old as Attachment;
+              const removed = getRealtimeOldRow<Attachment>(payload, "useTaskThread.attachments.delete", ["id"]);
+
+              if (!removed) {
+                return current;
+              }
+
               return current.filter((attachment) => attachment.id !== removed.id);
             }
 
             if (payload.eventType === "INSERT") {
-              const inserted = payload.new as Attachment;
+              const inserted = getRealtimeNewRow<Attachment>(payload, "useTaskThread.attachments.insert", [
+                "id",
+                "task_id",
+                "file_name",
+                "file_url",
+              ]);
+
+              if (!inserted) {
+                return current;
+              }
 
               if (current.some((attachment) => attachment.id === inserted.id)) {
                 return current;
@@ -232,7 +291,17 @@ export function useTaskThread({
               return [inserted, ...current];
             }
 
-            const updated = payload.new as Attachment;
+            const updated = getRealtimeNewRow<Attachment>(payload, "useTaskThread.attachments.update", [
+              "id",
+              "task_id",
+              "file_name",
+              "file_url",
+            ]);
+
+            if (!updated) {
+              return current;
+            }
+
             return current.map((attachment) => (attachment.id === updated.id ? updated : attachment));
           });
         },
@@ -263,7 +332,16 @@ export function useTaskThread({
           filter: `workspace_id=eq.${workspaceId}`,
         },
         (payload) => {
-          const inserted = payload.new as ActivityRow;
+          const inserted = getRealtimeNewRow<ActivityRow>(payload, "useTaskThread.activity.insert", [
+            "id",
+            "workspace_id",
+            "action",
+          ]);
+
+          if (!inserted) {
+            return;
+          }
+
           const metadata = inserted.metadata as Record<string, unknown> | null;
 
           if (inserted.project_id !== projectId || metadata?.taskId !== task.id) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { toast } from "@/components/ui/sonner";
 
@@ -10,6 +10,7 @@ import {
   upsertChatReadState,
 } from "@/lib/collaboration";
 import { createClient } from "@/lib/supabase/client";
+import { getRealtimeChangedRow, getRealtimeNewRow, getRealtimeOldRow } from "@/lib/supabase/realtime-payload";
 import { getCurrentUserProfileSnapshot } from "@/lib/supabase/user-profiles";
 import { getDisplayNameFromEmail, getMemberDisplayName } from "@/lib/utils/displayName";
 import type { Database } from "@/types/database.types";
@@ -33,7 +34,7 @@ function toFallbackName(userId: string): string {
 }
 
 export function useChat({ workspaceId, projectId = null, memberNames = {} }: UseChatOptions) {
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
   const [messages, setMessages] = useState<ChatItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -165,7 +166,14 @@ export function useChat({ workspaceId, projectId = null, memberNames = {} }: Use
         (payload) => {
           setMessages((current) => {
             if (payload.eventType === "DELETE") {
-              const removed = payload.old as MessageRow;
+              const removed = getRealtimeOldRow<MessageRow>(payload, "useChat.messages.delete", [
+                "id",
+                "project_id",
+              ]);
+
+              if (!removed) {
+                return current;
+              }
 
               if (!projectId && removed.project_id !== null) {
                 return current;
@@ -175,7 +183,17 @@ export function useChat({ workspaceId, projectId = null, memberNames = {} }: Use
             }
 
             if (payload.eventType === "INSERT") {
-              const inserted = payload.new as MessageRow;
+              const inserted = getRealtimeNewRow<MessageRow>(payload, "useChat.messages.insert", [
+                "id",
+                "workspace_id",
+                "project_id",
+                "user_id",
+                "content",
+              ]);
+
+              if (!inserted) {
+                return current;
+              }
 
               if (!projectId && inserted.project_id !== null) {
                 return current;
@@ -193,7 +211,17 @@ export function useChat({ workspaceId, projectId = null, memberNames = {} }: Use
               return [...withoutTemp, next];
             }
 
-            const updated = payload.new as MessageRow;
+            const updated = getRealtimeNewRow<MessageRow>(payload, "useChat.messages.update", [
+              "id",
+              "workspace_id",
+              "project_id",
+              "user_id",
+              "content",
+            ]);
+
+            if (!updated) {
+              return current;
+            }
 
             if (!projectId && updated.project_id !== null) {
               return current;
@@ -225,9 +253,17 @@ export function useChat({ workspaceId, projectId = null, memberNames = {} }: Use
           filter: currentUserId ? `user_id=eq.${currentUserId}` : undefined,
         },
         (payload) => {
-          const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as ChatReadStateRow;
+          const row = getRealtimeChangedRow<ChatReadStateRow>(payload, "useChat.readState", [
+            "workspace_id",
+            "user_id",
+            "scope_key",
+          ]);
 
-          if (!row || row.workspace_id !== workspaceId) {
+          if (!row) {
+            return;
+          }
+
+          if (row.workspace_id !== workspaceId) {
             return;
           }
 

@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ActivityItem } from "@/components/activity/ActivityItem";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
+import { getRealtimeNewRow } from "@/lib/supabase/realtime-payload";
 import { getCurrentUserProfileSnapshot } from "@/lib/supabase/user-profiles";
 import { getDisplayNameFromEmail, getMemberDisplayName } from "@/lib/utils/displayName";
 import type { Database } from "@/types/database.types";
@@ -28,7 +29,7 @@ function fallbackName(actorId: string | null): string {
 }
 
 export function ActivityFeed({ workspaceId, projectId = null, memberNames = {} }: ActivityFeedProps) {
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
   const [items, setItems] = useState<ActivityRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [offset, setOffset] = useState(0);
@@ -96,7 +97,16 @@ export function ActivityFeed({ workspaceId, projectId = null, memberNames = {} }
           filter: `workspace_id=eq.${workspaceId}`,
         },
         (payload) => {
-          const inserted = payload.new as ActivityRow;
+          const inserted = getRealtimeNewRow<ActivityRow>(payload, "ActivityFeed.activity.insert", [
+            "id",
+            "workspace_id",
+            "action",
+          ]);
+
+          if (!inserted) {
+            return;
+          }
+
           if (projectId && inserted.project_id !== projectId) {
             return;
           }

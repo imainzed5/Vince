@@ -184,7 +184,7 @@ export default function OverviewClient({
   renderedAt,
 }: OverviewClientProps) {
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
   const [project, setProject] = useState<Project>(initialProject);
   const [projectShares, setProjectShares] = useState<ProjectShare[]>(initialProjectShares);
   const [statusUpdates, setStatusUpdates] = useState<ProjectStatusUpdate[]>(initialStatusUpdates);

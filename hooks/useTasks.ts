@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 
 import { useRealtime } from "@/hooks/useRealtime";
+import { getRealtimeNewRow, getRealtimeOldRow } from "@/lib/supabase/realtime-payload";
 import type { Task, TaskDependency } from "@/types";
 import type { Database } from "@/types/database.types";
 
@@ -64,12 +65,27 @@ export function useTasks({ projectId, supabase, onError }: UseTasksOptions) {
           (payload) => {
             setTasks((current) => {
               if (payload.eventType === "DELETE") {
-                const removed = payload.old as Task;
+                const removed = getRealtimeOldRow<Task>(payload, "useTasks.tasks.delete", ["id"]);
+
+                if (!removed) {
+                  return current;
+                }
+
                 return current.filter((task) => task.id !== removed.id);
               }
 
               if (payload.eventType === "INSERT") {
-                const added = payload.new as Task;
+                const added = getRealtimeNewRow<Task>(payload, "useTasks.tasks.insert", [
+                  "id",
+                  "project_id",
+                  "status",
+                  "identifier",
+                  "title",
+                ]);
+
+                if (!added) {
+                  return current;
+                }
 
                 if (current.some((task) => task.id === added.id)) {
                   return current;
@@ -83,7 +99,18 @@ export function useTasks({ projectId, supabase, onError }: UseTasksOptions) {
                 return [...withoutTemp, added];
               }
 
-              const updated = payload.new as Task;
+              const updated = getRealtimeNewRow<Task>(payload, "useTasks.tasks.update", [
+                "id",
+                "project_id",
+                "status",
+                "identifier",
+                "title",
+              ]);
+
+              if (!updated) {
+                return current;
+              }
+
               return current.map((task) => (task.id === updated.id ? { ...task, ...updated } : task));
             });
           },
@@ -99,12 +126,26 @@ export function useTasks({ projectId, supabase, onError }: UseTasksOptions) {
           (payload) => {
             setDependencies((current) => {
               if (payload.eventType === "DELETE") {
-                const removed = payload.old as TaskDependency;
+                const removed = getRealtimeOldRow<TaskDependency>(payload, "useTasks.dependencies.delete", ["id"]);
+
+                if (!removed) {
+                  return current;
+                }
+
                 return current.filter((dependency) => dependency.id !== removed.id);
               }
 
               if (payload.eventType === "INSERT") {
-                const inserted = payload.new as TaskDependency;
+                const inserted = getRealtimeNewRow<TaskDependency>(payload, "useTasks.dependencies.insert", [
+                  "id",
+                  "project_id",
+                  "blocked_task_id",
+                  "blocking_task_id",
+                ]);
+
+                if (!inserted) {
+                  return current;
+                }
 
                 if (current.some((dependency) => dependency.id === inserted.id)) {
                   return current;
@@ -113,7 +154,17 @@ export function useTasks({ projectId, supabase, onError }: UseTasksOptions) {
                 return [...current, inserted];
               }
 
-              const updated = payload.new as TaskDependency;
+              const updated = getRealtimeNewRow<TaskDependency>(payload, "useTasks.dependencies.update", [
+                "id",
+                "project_id",
+                "blocked_task_id",
+                "blocking_task_id",
+              ]);
+
+              if (!updated) {
+                return current;
+              }
+
               return current.map((dependency) => (dependency.id === updated.id ? updated : dependency));
             });
           },

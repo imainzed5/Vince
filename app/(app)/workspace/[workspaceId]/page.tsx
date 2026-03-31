@@ -150,6 +150,7 @@ function getWorkloadBadgeClass(label: string): string {
 export default async function WorkspacePage({ params, searchParams }: WorkspacePageProps) {
   const { workspaceId } = await params;
   const { q } = await searchParams;
+  const renderedAt = Date.now();
   const searchQuery = (q ?? "").trim();
   const canRunSearch = searchQuery.length >= 2;
   const searchableQuery = searchQuery.replace(/[,%]/g, " ");
@@ -708,6 +709,7 @@ export default async function WorkspacePage({ params, searchParams }: WorkspaceP
                         : memberNames[item.actor_id ?? ""] ?? "System"
                     }
                     created_at={item.created_at}
+                    referenceTime={renderedAt}
                   />
                 ))}
               </ul>

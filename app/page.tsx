@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
@@ -165,10 +166,7 @@ export default async function HomePage() {
       <main>
         <section className="mx-auto max-w-6xl px-6 pb-18 pt-24 md:pb-22 md:pt-28">
           <LandingReveal className="mx-auto max-w-4xl text-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-4 py-2 text-sm font-medium text-slate-600 shadow-[0_12px_30px_-22px_rgba(15,23,42,0.3)] backdrop-blur">
-              <Sparkles className="h-4 w-4 text-blue-600" />
-              Built for freelance teams and student groups that need clarity fast
-            </div>
+            {/* Banner removed as requested */}
             <h1 className="mt-6 text-balance text-5xl font-semibold leading-[0.95] tracking-tight text-slate-950 md:text-7xl">
               Keep tasks, notes, and team chat in the same place.
             </h1>
@@ -429,22 +427,28 @@ export default async function HomePage() {
 
                   <div className="landing-panel rounded-[1.6rem] border border-white/70 p-5 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.4)]">
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                      Screenshot-ready product slots
+                      Product preview
                     </p>
                     <p className="mt-2 text-lg font-semibold text-slate-900">
-                      Strong in-code mockups now, easy to swap for real screenshots later.
+                      A quick look at how the workspace can feel in practice.
                     </p>
-                    <div className="mt-4 rounded-[1.4rem] border border-dashed border-slate-300 bg-slate-50 p-4">
-                      <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3 shadow-sm ring-1 ring-slate-200/90">
-                        <span className="text-sm font-medium text-slate-700">Captured product screenshot</span>
+                    <div className="mt-4 overflow-hidden rounded-[1.4rem] border border-slate-200 bg-slate-50 shadow-sm">
+                      <div className="flex items-center justify-between border-b border-slate-200 bg-white/92 px-4 py-3">
+                        <span className="text-sm font-medium text-slate-700">Workspace snapshot</span>
                         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500">
-                          Future swap
+                          Preview
                         </span>
                       </div>
-                      <p className="mt-3 text-sm leading-6 text-slate-500">
-                        The layout is already doing the storytelling. When real captures are ready,
-                        they can replace these surfaces without changing the page structure.
-                      </p>
+                      <div className="relative aspect-[3/2] bg-white">
+                        <Image
+                          src="/landing-workspace-snapshot.png"
+                          alt="Workspace preview showing a Vince board, shared notes, recent activity, and workspace chat"
+                          fill
+                          priority
+                          sizes="(min-width: 1024px) 32vw, (min-width: 768px) 40vw, 100vw"
+                          className="object-cover object-top"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>

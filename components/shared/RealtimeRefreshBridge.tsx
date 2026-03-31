@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
@@ -27,7 +27,7 @@ export function RealtimeRefreshBridge({
   enabled = true,
 }: RealtimeRefreshBridgeProps) {
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
   const timeoutRef = useRef<number | null>(null);
 
   const scheduleRefresh = useCallback(() => {

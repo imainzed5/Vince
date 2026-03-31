@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { Bookmark, CheckCircle2, Filter, FolderKanban, Link2, RotateCcw, Save, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 
 import { PRIORITY_CONFIG } from "@/components/board/config";
+import { BrowserMountTimingMark } from "@/components/shared/route-timing-bridge";
 import { TaskDetailPanel } from "@/components/tasks/TaskDetailPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ import {
 import { getTaskStatusLabel, isDoneTaskStatus, withTaskStatusFallbacks } from "@/lib/task-statuses";
 import { createClient } from "@/lib/supabase/client";
 import { buildTaskDependencyMaps, getTaskDueState } from "@/lib/task-insights";
+import { useMyTasksLiveData } from "@/hooks/useMyTasksLiveData";
 import { getMemberDisplayName } from "@/lib/utils/displayName";
 import { formatCalendarDate } from "@/lib/utils/time";
 import { cn } from "@/lib/utils";
@@ -121,18 +122,33 @@ export function MyTasksView({
   taskStatusesByWorkspace,
 }: MyTasksViewProps) {
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = createClient();
   const rememberedWorkspaceId = useWorkspaceStore((state) => state.currentWorkspaceId);
   const setCurrentWorkspaceId = useWorkspaceStore((state) => state.setCurrentWorkspaceId);
-  const [dependencyItems, setDependencyItems] = useState<TaskDependency[]>(initialDependencies);
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
-  const [workspaceItems, setWorkspaceItems] = useState<Workspace[]>(workspaces);
-  const [projectItems, setProjectItems] = useState<Project[]>(projects);
-  const [milestoneItems, setMilestoneItems] = useState<Milestone[]>(milestones);
-  const [workspaceMembers, setWorkspaceMembers] = useState<Record<string, MemberOption[]>>(membersByWorkspace);
-  const [workspaceTaskStatuses, setWorkspaceTaskStatuses] = useState<Record<string, WorkspaceTaskStatusDefinition[]>>(taskStatusesByWorkspace);
-  const [realtimeConnected, setRealtimeConnected] = useState(false);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const {
+    dependencyItems,
+    tasks,
+    workspaceItems,
+    projectItems,
+    milestoneItems,
+    workspaceMembers,
+    workspaceTaskStatuses,
+    realtimeConnected,
+    selectedTaskId,
+    setSelectedTaskId,
+    updateTask,
+    addTaskIfMissing,
+    removeTask,
+  } = useMyTasksLiveData({
+    currentUserId,
+    initialDependencies,
+    initialTasks,
+    workspaces,
+    projects,
+    milestones,
+    membersByWorkspace,
+    taskStatusesByWorkspace,
+  });
   const [workspaceFilter, setWorkspaceFilter] = useState<string>(defaultWorkspaceId ?? "all");
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
@@ -153,7 +169,6 @@ export function MyTasksView({
     [projectItems],
   );
   const workspaceIds = useMemo(() => workspaceItems.map((workspace) => workspace.id), [workspaceItems]);
-  const projectIds = useMemo(() => projectItems.map((project) => project.id), [projectItems]);
   const { blockedByMap, blockingMap } = useMemo(() => buildTaskDependencyMaps(dependencyItems), [dependencyItems]);
   const hasActiveFilters =
     workspaceFilter !== DEFAULT_MY_TASKS_SAVED_VIEW_CONFIG.workspaceFilter ||
@@ -296,47 +311,16 @@ export function MyTasksView({
   }).length;
 
   const handleTaskUpdated = (updatedTask: Task) => {
-    setTasks((current) => current.map((task) => (task.id === updatedTask.id ? { ...task, ...updatedTask } : task)));
+    updateTask(updatedTask);
   };
 
   const handleTaskDuplicated = (createdTask: Task) => {
-    setTasks((current) => {
-      if (current.some((task) => task.id === createdTask.id)) {
-        return current;
-      }
-
-      return [...current, createdTask];
-    });
+    addTaskIfMissing(createdTask);
   };
 
   const handleTaskDeleted = (taskId: string) => {
-    setSelectedTaskId((current) => (current === taskId ? null : current));
-    setTasks((current) => current.filter((task) => task.id !== taskId));
+    removeTask(taskId);
   };
-
-  useEffect(() => {
-    setWorkspaceItems(workspaces);
-  }, [workspaces]);
-
-  useEffect(() => {
-    setProjectItems(projects);
-  }, [projects]);
-
-  useEffect(() => {
-    setMilestoneItems(milestones);
-  }, [milestones]);
-
-  useEffect(() => {
-    setWorkspaceMembers(membersByWorkspace);
-  }, [membersByWorkspace]);
-
-  useEffect(() => {
-    setWorkspaceTaskStatuses(taskStatusesByWorkspace);
-  }, [taskStatusesByWorkspace]);
-
-  useEffect(() => {
-    setDependencyItems(initialDependencies);
-  }, [initialDependencies]);
 
   useEffect(() => {
     if (defaultWorkspaceId) {
@@ -400,7 +384,17 @@ export function MyTasksView({
           filter: "scope=eq.my_tasks",
         },
         (payload) => {
-          const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as SavedViewRow;
+          const row = getRealtimeChangedRow<SavedViewRow>(payload, "MyTasksView.savedViews", [
+            "id",
+            "scope",
+            "project_id",
+            "name",
+            "user_id",
+          ]);
+
+          if (!row) {
+            return;
+          }
 
           if (row.project_id) {
             return;
@@ -448,223 +442,6 @@ export function MyTasksView({
     setAttentionFilter(config.attentionFilter);
     setSortOption(config.sortOption);
   }, [savedViews, selectedSavedViewId]);
-
-  useEffect(() => {
-    if (!workspaceIds.length) {
-      setRealtimeConnected(false);
-      return;
-    }
-
-    const channel = supabase.channel(`my-tasks:${currentUserId}`);
-
-    const handleWorkspaceChange = (payload: RealtimePostgresChangesPayload<Workspace>) => {
-      const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as Workspace;
-
-      setWorkspaceItems((current) => {
-        if (payload.eventType === "DELETE") {
-          return current.filter((workspace) => workspace.id !== row.id);
-        }
-
-        return upsertById(current, row).sort(
-          (left, right) => new Date(left.created_at ?? 0).getTime() - new Date(right.created_at ?? 0).getTime(),
-        );
-      });
-    };
-
-    const handleProjectChange = (payload: RealtimePostgresChangesPayload<Project>) => {
-      const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as Project;
-
-      if (payload.eventType === "DELETE") {
-        setProjectItems((current) => current.filter((project) => project.id !== row.id));
-        setTasks((current) => current.filter((task) => task.project_id !== row.id));
-        setMilestoneItems((current) => current.filter((milestone) => milestone.project_id !== row.id));
-        return;
-      }
-
-      setProjectItems((current) =>
-        upsertById(current, row).sort(
-          (left, right) => new Date(left.created_at ?? 0).getTime() - new Date(right.created_at ?? 0).getTime(),
-        ),
-      );
-    };
-
-    const handleTaskChange = (payload: RealtimePostgresChangesPayload<Task>) => {
-      const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as Task;
-
-      if (payload.eventType === "DELETE") {
-        setSelectedTaskId((current) => (current === row.id ? null : current));
-        setTasks((current) => current.filter((task) => task.id !== row.id));
-        return;
-      }
-
-      setTasks((current) => {
-        const nextTasks = upsertById(current, row);
-        return nextTasks.sort(
-          (left, right) => new Date(right.created_at ?? 0).getTime() - new Date(left.created_at ?? 0).getTime(),
-        );
-      });
-    };
-
-    const handleMilestoneChange = (payload: RealtimePostgresChangesPayload<Milestone>) => {
-      const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as Milestone;
-
-      if (payload.eventType === "DELETE") {
-        setMilestoneItems((current) => current.filter((milestone) => milestone.id !== row.id));
-        setTasks((current) =>
-          current.map((task) => (task.milestone_id === row.id ? { ...task, milestone_id: null } : task)),
-        );
-        return;
-      }
-
-      setMilestoneItems((current) => {
-        const nextMilestones = upsertById(current, row);
-        return nextMilestones.sort(
-          (left, right) => new Date(left.created_at ?? 0).getTime() - new Date(right.created_at ?? 0).getTime(),
-        );
-      });
-    };
-
-    const handleDependencyChange = (payload: RealtimePostgresChangesPayload<TaskDependency>) => {
-      const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as TaskDependency;
-
-      if (payload.eventType === "DELETE") {
-        setDependencyItems((current) => current.filter((dependency) => dependency.id !== row.id));
-        return;
-      }
-
-      setDependencyItems((current) => {
-        if (current.some((dependency) => dependency.id === row.id)) {
-          return current.map((dependency) => (dependency.id === row.id ? row : dependency));
-        }
-
-        return [...current, row];
-      });
-    };
-
-    const handleWorkspaceMemberChange = (payload: RealtimePostgresChangesPayload<WorkspaceMemberRow>) => {
-      const row = (payload.eventType === "DELETE" ? payload.old : payload.new) as WorkspaceMemberRow;
-
-      if (row.user_id === currentUserId) {
-        router.refresh();
-        return;
-      }
-
-      setWorkspaceMembers((current) => {
-        const currentMembers = current[row.workspace_id] ?? [];
-
-        if (payload.eventType === "DELETE") {
-          return {
-            ...current,
-            [row.workspace_id]: currentMembers.filter((member) => member.id !== row.user_id),
-          };
-        }
-
-        const nextMember: MemberOption = {
-          id: row.user_id,
-          role: row.role,
-          name: currentMembers.find((member) => member.id === row.user_id)?.name ?? fallbackMemberName(row.user_id),
-        };
-        const nextMembers = currentMembers.some((member) => member.id === row.user_id)
-          ? currentMembers.map((member) => (member.id === row.user_id ? nextMember : member))
-          : [...currentMembers, nextMember];
-
-        return {
-          ...current,
-          [row.workspace_id]: nextMembers,
-        };
-      });
-    };
-
-    channel.on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "workspace_members",
-        filter: `user_id=eq.${currentUserId}`,
-      },
-      () => {
-        router.refresh();
-      },
-    );
-
-    for (const workspaceId of workspaceIds) {
-      channel
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "workspaces",
-            filter: `id=eq.${workspaceId}`,
-          },
-          handleWorkspaceChange,
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "projects",
-            filter: `workspace_id=eq.${workspaceId}`,
-          },
-          handleProjectChange,
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "workspace_members",
-            filter: `workspace_id=eq.${workspaceId}`,
-          },
-          handleWorkspaceMemberChange,
-        );
-    }
-
-    for (const projectId of projectIds) {
-      channel
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "tasks",
-            filter: `project_id=eq.${projectId}`,
-          },
-          handleTaskChange,
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "milestones",
-            filter: `project_id=eq.${projectId}`,
-          },
-          handleMilestoneChange,
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "task_dependencies",
-            filter: `project_id=eq.${projectId}`,
-          },
-          handleDependencyChange,
-        );
-    }
-
-    channel.subscribe((status) => {
-      setRealtimeConnected(status === "SUBSCRIBED");
-    });
-
-    return () => {
-      setRealtimeConnected(false);
-      void supabase.removeChannel(channel);
-    };
-  }, [currentUserId, projectIds, router, supabase, workspaceIds]);
 
   const saveCurrentView = async () => {
     const suggestedName = savedViews.length === 0 ? "My focus" : `My view ${savedViews.length + 1}`;
@@ -736,6 +513,15 @@ export function MyTasksView({
 
   return (
     <main className="space-y-6 p-6">
+      <BrowserMountTimingMark
+        name="my-tasks-view"
+        context={{
+          workspaceCount: workspaceItems.length,
+          projectCount: projectItems.length,
+          visibleTaskCount: visibleTasks.length,
+          assignedTaskCount: myTasks.length,
+        }}
+      />
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">My tasks</h1>
